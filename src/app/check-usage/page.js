@@ -24,6 +24,18 @@ function fmtDate(value) {
   });
 }
 
+function fmtDateTime(value) {
+  if (!value) return "No expiry";
+  return new Date(value).toLocaleString("en-GB", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function pct(used, limit) {
   const max = Number(limit || 0);
   if (max <= 0) return 0;
@@ -180,7 +192,7 @@ export default function CheckUsagePage() {
   const dailyTrend = result?.dailyTrend || [];
   const resetMs = status?.resetAt ? Math.max(0, new Date(status.resetAt).getTime() - now) : status?.resetInMs || 0;
   const totalPercent = pct(usage?.totalTokens, quota.maxTotalTokens);
-  const statusLabel = status?.active ? (status.exceeded ? "Limit reached" : "Active") : "Locked";
+  const statusLabel = status?.expired ? "Expired" : status?.active ? (status.exceeded ? "Limit reached" : "Active") : "Locked";
 
   const statusTone = useMemo(() => {
     if (!status) return "bg-neutral-800 text-neutral-300";
@@ -322,15 +334,18 @@ export default function CheckUsagePage() {
             <TrendChart data={dailyTrend} />
             <CountdownBlock resetMs={resetMs} />
 
-            <div className="grid gap-3 border-t border-neutral-800/90 px-6 py-4 text-xs text-neutral-500 sm:grid-cols-3">
+            <div className="grid gap-3 border-t border-neutral-800/90 px-6 py-4 text-xs text-neutral-500 sm:grid-cols-4">
               <div className="flex items-center gap-2">
                 <Icon className="h-5 w-5">
                   <path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Z" />
                 </Icon>
                 Created: <span className="font-semibold text-neutral-300">{fmtDate(key.createdAt)}</span>
               </div>
-              <div className="flex items-center justify-center gap-2">
+              <div className="flex items-center gap-2 sm:justify-center">
                 Window: <span className="font-semibold text-neutral-300">{status.window}</span>
+              </div>
+              <div className="flex items-center gap-2 sm:justify-center">
+                Expires: <span className={status.expired ? "font-semibold text-red-300" : "font-semibold text-neutral-300"}>{fmtDateTime(status.expiresAt)}</span>
               </div>
               <div className="flex items-center gap-2 sm:justify-end">
                 <Icon className="h-5 w-5">

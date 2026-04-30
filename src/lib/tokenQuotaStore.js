@@ -166,9 +166,29 @@ function shapeTokenApiKey(key) {
   return {
     ...key,
     enabled: key.isActive !== false,
+    expired: isApiKeyExpired(key),
     quota: ensureQuotaShape(key),
     allowedModels: Array.isArray(key.allowedModels) ? key.allowedModels : [],
   };
+}
+
+function isApiKeyExpired(key, at = new Date()) {
+  if (!key?.expiresAt) return false;
+  const expiresAt = new Date(key.expiresAt).getTime();
+  return Number.isFinite(expiresAt) && expiresAt <= at.getTime();
+}
+
+function normalizeExpiresAt(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const date = new Date(raw);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
+function buildExpiredKeyMessage(key) {
+  const keyName = key?.name || key?.id || "API key";
+  const expiresAt = key?.expiresAt ? new Date(key.expiresAt).toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }) : "the configured expiration time";
+  return `API key "${keyName}" expired at ${expiresAt} Vietnam time. Extend the expiration in API Key Token Limits to use it again.`;
 }
 
 function normalizeUsageTotals(usage = {}) {
@@ -319,7 +339,23 @@ function formatDuration(ms) {
 
 async function refreshQuotaLockState(rawKey) {
   const key = shapeTokenApiKey(rawKey);
-  if (!key || key.disabledReason !== "token_quota_exceeded") return key;
+  if (!key) return key;
+
+  if (isApiKeyExpired(key)) {
+    if (key.enabled !== false || key.disabledReason !== "api_key_expired") {
+      const updated = await updateApiKey(key.id, {
+        isActive: false,
+        disabledReason: "api_key_expired",
+        disabledMessage: buildExpiredKeyMessage(key),
+        disabledAt: new Date().toISOString(),
+        expiredAt: key.expiresAt,
+      });
+      return shapeTokenApiKey(updated);
+    }
+    return key;
+  }
+
+  if (key.disabledReason !== "token_quota_exceeded") return key;
 
   const window = key.quota?.window || "daily";
   const windowStart = quotaWindowStart(window);
@@ -374,6 +410,10 @@ export async function createTokenApiKey(input = {}) {
     allowedModels: Array.isArray(input.allowedModels) ? input.allowedModels : [],
     quota: ensureQuotaShape({ quota: input.quota || {} }),
   };
+  if (typeof input.expiresAt === "string" && input.expiresAt.trim()) {
+    const expiresAt = normalizeExpiresAt(input.expiresAt);
+    patch.expiresAt = expiresAt;
+  }
   const updated = await updateApiKey(apiKey.id, patch);
   return shapeTokenApiKey(updated);
 }
@@ -397,13 +437,30 @@ export async function updateTokenApiKey(id, patch = {}) {
       updateData.disabledAt = null;
     }
   }
+  if (Object.prototype.hasOwnProperty.call(patch, "expiresAt")) {
+    updateData.expiresAt = normalizeExpiresAt(patch.expiresAt);
+    updateData.expiredAt = null;
+  }
   if (Array.isArray(patch.allowedModels)) updateData.allowedModels = patch.allowedModels;
   if (patch.quota) updateData.quota = { ...ensureQuotaShape({}), ...patch.quota };
+
+  const keys = await getApiKeys();
+  const current = keys.find((item) => item.id === id);
+  if (
+    current?.disabledReason === "api_key_expired" &&
+    Object.prototype.hasOwnProperty.call(updateData, "expiresAt") &&
+    (!updateData.expiresAt || !isApiKeyExpired({ expiresAt: updateData.expiresAt }))
+  ) {
+    updateData.isActive = true;
+    updateData.disabledReason = null;
+    updateData.disabledMessage = null;
+    updateData.disabledAt = null;
+  }
 
   const updated = await updateApiKey(id, updateData);
   if (!updated) return null;
 
-  return shapeTokenApiKey(updated);
+  return refreshQuotaLockState(updated);
 }
 
 export async function deleteTokenApiKey(id) {
@@ -609,6 +666,17 @@ export async function setTokenApiKeyUsage({ apiKeyId, window = "monthly", totalT
 
 export async function checkTokenQuota({ apiKey, body }) {
   if (!apiKey) return { allowed: false, status: 401, error: "Missing or invalid API key" };
+  if (isApiKeyExpired(apiKey)) {
+    const refreshed = await refreshQuotaLockState(apiKey);
+    return {
+      allowed: false,
+      status: 403,
+      error: refreshed?.disabledMessage || buildExpiredKeyMessage(apiKey),
+      limit: refreshed?.quota || apiKey.quota,
+      keyDisabled: true,
+      keyExpired: true,
+    };
+  }
   if (apiKey.enabled === false || apiKey.isActive === false) {
     return {
       allowed: false,
@@ -780,6 +848,8 @@ export async function getTokenApiKeyStatusBySecret(secret) {
       id: apiKey.id,
       name: apiKey.name,
       enabled: effectiveEnabled,
+      expired: apiKey.expired || apiKey.disabledReason === "api_key_expired",
+      expiresAt: apiKey.expiresAt || null,
       createdAt: apiKey.createdAt,
       allowedModels: apiKey.allowedModels || [],
       quota: limit,
@@ -791,6 +861,8 @@ export async function getTokenApiKeyStatusBySecret(secret) {
     dailyTrend,
     status: {
       active: effectiveEnabled,
+      expired: apiKey.expired || apiKey.disabledReason === "api_key_expired",
+      expiresAt: apiKey.expiresAt || null,
       exceeded,
       breach,
       window,

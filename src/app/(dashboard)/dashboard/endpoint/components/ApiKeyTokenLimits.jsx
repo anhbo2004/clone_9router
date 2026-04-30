@@ -18,6 +18,29 @@ function percent(used, limit) {
   return Number(limit || 0) > 0 ? Math.min(100, Math.round((Number(used || 0) / Number(limit || 0)) * 100)) : 0;
 }
 
+function formatDateTimeLocal(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  const pad = (part) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function addDaysLocal(days) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  date.setSeconds(0, 0);
+  return formatDateTimeLocal(date.toISOString());
+}
+
+function formatExpiry(value) {
+  if (!value) return "No expiry";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "No expiry";
+  const label = date.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+  return date.getTime() <= Date.now() ? `Expired: ${label}` : `Expires: ${label}`;
+}
+
 const AUTO_REFRESH_MS = 60_000;
 
 export default function ApiKeyTokenLimits() {
@@ -39,6 +62,7 @@ export default function ApiKeyTokenLimits() {
     window: "daily",
     maxTotalTokens: 1000000,
     allowedModels: "",
+    expiresAt: "",
   });
 
   async function load() {
@@ -58,6 +82,7 @@ export default function ApiKeyTokenLimits() {
           nextKeys.map((key) => {
             const current = {
               limit: Number(key.quota?.maxTotalTokens || 0),
+              expiresAt: formatDateTimeLocal(key.expiresAt),
             };
             return [key.id, dirtyRows[key.id] ? prev[key.id] || current : current];
           })
@@ -117,11 +142,12 @@ export default function ApiKeyTokenLimits() {
             maxOutputTokens: 0,
             action: "reject",
           },
+          expiresAt: form.expiresAt || null,
         }),
       });
       const data = await res.json();
       setSecret(data.secret || data.key?.secret || "");
-      setForm({ ...form, name: "" });
+      setForm({ ...form, name: "", expiresAt: "" });
       await load();
     } finally {
       setLoading(false);
@@ -140,6 +166,7 @@ export default function ApiKeyTokenLimits() {
   function getRowEdit(key) {
     return rowEdits[key.id] || {
       limit: Number(key.quota?.maxTotalTokens || 0),
+      expiresAt: formatDateTimeLocal(key.expiresAt),
     };
   }
 
@@ -159,6 +186,7 @@ export default function ApiKeyTokenLimits() {
           maxInputTokens: 0,
           maxOutputTokens: 0,
         },
+        expiresAt: edit.expiresAt || null,
       });
       setDirtyRows((prev) => {
         const next = { ...prev };
@@ -236,7 +264,7 @@ export default function ApiKeyTokenLimits() {
         </div>
       ) : null}
 
-      <div className="mb-6 grid gap-3 md:grid-cols-6">
+      <div className="mb-6 grid gap-3 md:grid-cols-7">
         <input className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 md:col-span-2" placeholder="Tên key, ví dụ: Team A" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         <input className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2" type="number" placeholder="Total tokens" value={form.maxTotalTokens} onChange={(e) => setForm({ ...form, maxTotalTokens: e.target.value })} />
         <select className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2" value={form.window} onChange={(e) => setForm({ ...form, window: e.target.value })}>
@@ -246,17 +274,25 @@ export default function ApiKeyTokenLimits() {
           <option value="monthly">Monthly</option>
         </select>
         <input className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2" placeholder="Allowed models, cách nhau bằng dấu phẩy" value={form.allowedModels} onChange={(e) => setForm({ ...form, allowedModels: e.target.value })} />
+        <input
+          className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm"
+          type="datetime-local"
+          title="API key expiration time"
+          value={form.expiresAt}
+          onChange={(e) => setForm({ ...form, expiresAt: e.target.value })}
+        />
         <button disabled={loading} onClick={createKey} className="rounded-lg bg-orange-600 px-4 py-2 font-semibold text-white hover:bg-orange-500 disabled:opacity-60">Create key</button>
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-neutral-800">
-        <table className="w-full min-w-[900px] text-sm">
+        <table className="w-full min-w-[1120px] text-sm">
           <thead className="bg-neutral-900 text-neutral-300">
             <tr>
               <th className="p-3 text-left">Name</th>
               <th className="p-3 text-left">Key</th>
               <th className="p-3 text-left">Window</th>
               <th className="p-3 text-left">Used / Limit</th>
+              <th className="p-3 text-left">Expiration</th>
               <th className="p-3 text-left">Allowed Models</th>
               <th className="p-3 text-left">Status</th>
               <th className="p-3 text-right">Actions</th>
@@ -272,6 +308,7 @@ export default function ApiKeyTokenLimits() {
               const pct = percent(used, limit);
               const over = limit > 0 && used >= limit;
               const quotaLocked = key.disabledReason === "token_quota_exceeded";
+              const expired = key.expired || key.disabledReason === "api_key_expired";
               return (
                 <tr key={key.id} className="border-t border-neutral-800">
                   <td className="p-3 font-medium">{key.name}</td>
@@ -305,9 +342,30 @@ export default function ApiKeyTokenLimits() {
                       />
                     </div>
                   </td>
+                  <td className="p-3">
+                    <div className={expired ? "text-red-300" : "text-neutral-300"}>{formatExpiry(key.expiresAt)}</div>
+                    <input
+                      className="mt-2 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
+                      type="datetime-local"
+                      value={edit.expiresAt}
+                      onChange={(e) => onChangeRow(key.id, "expiresAt", e.target.value)}
+                    />
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      <button type="button" className="rounded bg-neutral-800 px-2 py-1 text-xs hover:bg-neutral-700" onClick={() => onChangeRow(key.id, "expiresAt", addDaysLocal(7))}>+7d</button>
+                      <button type="button" className="rounded bg-neutral-800 px-2 py-1 text-xs hover:bg-neutral-700" onClick={() => onChangeRow(key.id, "expiresAt", addDaysLocal(30))}>+30d</button>
+                      <button type="button" className="rounded bg-neutral-800 px-2 py-1 text-xs hover:bg-neutral-700" onClick={() => onChangeRow(key.id, "expiresAt", "")}>No expiry</button>
+                    </div>
+                  </td>
                   <td className="p-3 text-neutral-300">{key.allowedModels?.length ? key.allowedModels.join(", ") : "All"}</td>
                   <td className="p-3">
-                    {key.enabled ? (
+                    {expired ? (
+                      <div className="max-w-[220px]">
+                        <span className="text-red-400">Expired</span>
+                        {key.disabledMessage ? (
+                          <div className="mt-1 text-xs text-red-300">{key.disabledMessage}</div>
+                        ) : null}
+                      </div>
+                    ) : key.enabled ? (
                       <span className="text-green-400">Enabled</span>
                     ) : (
                       <div className="max-w-[220px]">
@@ -323,7 +381,7 @@ export default function ApiKeyTokenLimits() {
                       {testingId === key.id ? "Testing..." : "Quick test"}
                     </button>
                     <button className="rounded bg-emerald-700 px-3 py-1 hover:bg-emerald-600 disabled:opacity-60" disabled={savingId === key.id} onClick={() => saveRow(key)}>
-                      {savingId === key.id ? "Saving..." : "Save Limit"}
+                      {savingId === key.id ? "Saving..." : "Save"}
                     </button>
                     <button className="rounded bg-neutral-800 px-3 py-1 hover:bg-neutral-700" onClick={() => patchKey(key.id, { enabled: !key.enabled })}>{key.enabled ? "Disable" : "Enable"}</button>
                     <button className="rounded bg-red-700 px-3 py-1 hover:bg-red-600" onClick={() => deleteKey(key.id)}>Delete</button>
@@ -331,7 +389,7 @@ export default function ApiKeyTokenLimits() {
                 </tr>
               );
             })}
-            {!keys.length ? <tr><td colSpan={7} className="p-6 text-center text-neutral-400">Chua co API key token-limit nao.</td></tr> : null}
+            {!keys.length ? <tr><td colSpan={8} className="p-6 text-center text-neutral-400">Chua co API key token-limit nao.</td></tr> : null}
           </tbody>
         </table>
       </div>
