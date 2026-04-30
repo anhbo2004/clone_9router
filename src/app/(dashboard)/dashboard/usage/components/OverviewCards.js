@@ -4,7 +4,11 @@ import PropTypes from "prop-types";
 import Card from "@/shared/components/Card";
 
 const fmt = (n) => new Intl.NumberFormat().format(n || 0);
-const fmtCost = (n) => `$${(n || 0).toFixed(2)}`;
+const fmtCost = (n) => {
+  const value = Number(n || 0);
+  if (value > 0 && value < 0.01) return `$${value.toFixed(6)}`;
+  return `$${value.toFixed(2)}`;
+};
 
 export default function OverviewCards({ stats }) {
   return (
@@ -12,6 +16,7 @@ export default function OverviewCards({ stats }) {
       <Card className="px-4 py-3 flex flex-col gap-1">
         <span className="text-text-muted text-sm uppercase font-semibold">Total Requests</span>
         <span className="text-2xl font-bold">{fmt(stats.totalRequests)}</span>
+        <span className="text-[10px] text-text-muted">Selected period</span>
       </Card>
       <Card className="px-4 py-3 flex flex-col gap-1">
         <span className="text-text-muted text-sm uppercase font-semibold">Total Input Tokens</span>
@@ -22,9 +27,11 @@ export default function OverviewCards({ stats }) {
         <span className="text-2xl font-bold text-success">{fmt(stats.totalCompletionTokens)}</span>
       </Card>
       <Card className="px-4 py-3 flex flex-col gap-1">
-        <span className="text-text-muted text-sm uppercase font-semibold">Est. Cost</span>
-        <span className="text-2xl font-bold text-warning">~{fmtCost(stats.totalCost)}</span>
-        <span className="text-[10px] text-text-muted">Estimated, not actual billing</span>
+        <span className="text-text-muted text-sm uppercase font-semibold">Measured Cost</span>
+        <span className="text-2xl font-bold text-warning">{fmtCost(stats.totalCost)}</span>
+        <span className="text-[10px] text-text-muted">
+          In {fmtCost(stats.totalInputCost)} / Out {fmtCost(stats.totalOutputCost)}
+        </span>
       </Card>
     </div>
   );

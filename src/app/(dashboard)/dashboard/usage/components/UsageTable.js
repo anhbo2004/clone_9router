@@ -6,7 +6,11 @@ import Card from "@/shared/components/Card";
 import Badge from "@/shared/components/Badge";
 
 const fmt = (n) => new Intl.NumberFormat().format(n || 0);
-const fmtCost = (n) => `$${(n || 0).toFixed(2)}`;
+const fmtCost = (n) => {
+  const value = Number(n || 0);
+  if (value > 0 && value < 0.01) return `$${value.toFixed(6)}`;
+  return `$${value.toFixed(2)}`;
+};
 
 function fmtTime(iso) {
   if (!iso) return "Never";
@@ -18,8 +22,8 @@ function fmtTime(iso) {
 }
 
 function SortIcon({ field, currentSort, currentOrder }) {
-  if (currentSort !== field) return <span className="ml-1 opacity-20">↕</span>;
-  return <span className="ml-1">{currentOrder === "asc" ? "↑" : "↓"}</span>;
+  const icon = currentSort !== field ? "unfold_more" : currentOrder === "asc" ? "arrow_upward" : "arrow_downward";
+  return <span className="material-symbols-outlined ml-1 align-middle text-[15px] opacity-60">{icon}</span>;
 }
 
 SortIcon.propTypes = {
@@ -36,10 +40,10 @@ function ValueCells({ item, viewMode, isSummary = false }) {
     return (
       <>
         <td className="px-6 py-3 text-right text-text-muted">
-          {isSummary && item.promptTokens === undefined ? "—" : fmt(item.promptTokens)}
+          {isSummary && item.promptTokens === undefined ? "-" : fmt(item.promptTokens)}
         </td>
         <td className="px-6 py-3 text-right text-text-muted">
-          {isSummary && item.completionTokens === undefined ? "—" : fmt(item.completionTokens)}
+          {isSummary && item.completionTokens === undefined ? "-" : fmt(item.completionTokens)}
         </td>
         <td className="px-6 py-3 text-right font-medium">
           {fmt(item.totalTokens)}
@@ -50,10 +54,10 @@ function ValueCells({ item, viewMode, isSummary = false }) {
   return (
     <>
       <td className="px-6 py-3 text-right text-text-muted">
-        {isSummary && item.inputCost === undefined ? "—" : fmtCost(item.inputCost)}
+        {isSummary && item.inputCost === undefined ? "-" : fmtCost(item.inputCost)}
       </td>
       <td className="px-6 py-3 text-right text-text-muted">
-        {isSummary && item.outputCost === undefined ? "—" : fmtCost(item.outputCost)}
+        {isSummary && item.outputCost === undefined ? "-" : fmtCost(item.outputCost)}
       </td>
       <td className="px-6 py-3 text-right font-medium text-warning">
         {fmtCost(item.totalCost || item.cost)}
@@ -138,8 +142,8 @@ export default function UsageTable({
       ];
     }
     return [
-      { field: "promptTokens", label: "Input Cost" },
-      { field: "completionTokens", label: "Output Cost" },
+      { field: "inputCost", label: "Input Cost" },
+      { field: "outputCost", label: "Output Cost" },
       { field: "cost", label: "Total Cost" },
     ];
   }, [viewMode]);
@@ -148,9 +152,11 @@ export default function UsageTable({
 
   return (
     <Card className="overflow-hidden">
-      <div className="p-4 border-b border-border bg-bg-subtle/50">
-        <h3 className="font-semibold">{title}</h3>
-      </div>
+      {title ? (
+        <div className="p-4 border-b border-border bg-bg-subtle/50">
+          <h3 className="font-semibold">{title}</h3>
+        </div>
+      ) : null}
       <div className="overflow-x-auto">
         <table className="w-full text-sm text-left">
           <thead className="bg-bg-subtle/30 text-text-muted uppercase text-xs">
