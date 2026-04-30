@@ -20,15 +20,17 @@ function getProviderImageUrl(providerId) {
 
 // Custom provider node - rectangle with image + name
 function ProviderNode({ data }) {
-  const { label, color, imageUrl, textIcon, active } = data;
+  const { label, color, imageUrl, textIcon, active, providerId } = data;
+  const isCodex = providerId === "codex";
   const [imgError, setImgError] = useState(false);
   return (
     <div
-      className="flex items-center gap-2.5 px-4 py-2.5 rounded-lg border-2 transition-all duration-300 bg-bg"
+      className={`flex items-center rounded-lg border-2 bg-bg transition-all duration-300 ${isCodex ? "gap-2.5 px-3.5 py-2" : "gap-2.5 px-4 py-2.5"}`}
       style={{
         borderColor: active ? color : "var(--color-border)",
         boxShadow: active ? `0 0 16px ${color}40` : "none",
-        minWidth: "150px",
+        minWidth: isCodex ? "174px" : "150px",
+        maxWidth: isCodex ? "190px" : undefined,
       }}
     >
       <Handle type="target" position={Position.Top} id="top" className="!bg-transparent !border-0 !w-0 !h-0" />
@@ -38,11 +40,11 @@ function ProviderNode({ data }) {
 
       {/* Provider icon */}
       <div
-        className="w-8 h-8 rounded-md flex items-center justify-center shrink-0"
+        className={`${isCodex ? "h-7 w-7" : "h-8 w-8"} rounded-md flex items-center justify-center shrink-0`}
         style={{ backgroundColor: `${color}15` }}
       >
         {!imgError ? (
-          <img src={imageUrl} alt={label} className="w-6 h-6 rounded-sm object-contain" onError={() => setImgError(true)} />
+          <img src={imageUrl} alt={label} className={`${isCodex ? "h-5 w-5" : "h-6 w-6"} rounded-sm object-contain`} onError={() => setImgError(true)} />
         ) : (
           <span className="text-sm font-bold" style={{ color }}>{textIcon}</span>
         )}
@@ -50,7 +52,7 @@ function ProviderNode({ data }) {
 
       {/* Provider name */}
       <span
-        className="text-base font-medium truncate"
+        className={`${isCodex ? "text-sm font-semibold" : "text-base font-medium"} truncate`}
         style={{ color: active ? color : "var(--color-text)" }}
       >
         {label}
@@ -74,16 +76,16 @@ ProviderNode.propTypes = {
 // Center 9Router node
 function RouterNode({ data }) {
   return (
-    <div className="flex items-center justify-center px-5 py-3 rounded-xl border-2 border-primary bg-primary/5 shadow-md min-w-[130px]">
+    <div className="flex min-w-[126px] items-center justify-center rounded-xl border-2 border-primary bg-primary/5 px-4 py-2.5 shadow-md">
       <Handle type="source" position={Position.Top} id="top" className="!bg-transparent !border-0 !w-0 !h-0" />
       <Handle type="source" position={Position.Bottom} id="bottom" className="!bg-transparent !border-0 !w-0 !h-0" />
       <Handle type="source" position={Position.Left} id="left" className="!bg-transparent !border-0 !w-0 !h-0" />
       <Handle type="source" position={Position.Right} id="right" className="!bg-transparent !border-0 !w-0 !h-0" />
 
-      <img src="/favicon.svg" alt="9Router" className="w-6 h-6 mr-2" />
+      <img src="/favicon.svg" alt="9Router" className="mr-2 h-5 w-5" />
       <span className="text-sm font-bold text-primary">9Router</span>
       {data.activeCount > 0 && (
-        <span className="ml-2 px-1.5 py-0.5 rounded-full bg-primary text-white text-xs font-bold">
+        <span className="ml-2 rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-bold leading-none text-white">
           {data.activeCount}
         </span>
       )}
@@ -148,6 +150,7 @@ function buildLayout(providers, activeSet, lastSet, errorSet) {
       imageUrl: getProviderImageUrl(p.provider),
       textIcon: config.textIcon || (p.provider || "?").slice(0, 2).toUpperCase(),
       active,
+      providerId: p.provider,
     };
 
     // Distribute evenly starting from top (−π/2), clockwise
