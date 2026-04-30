@@ -14,6 +14,8 @@ const DEFAULT_DB = {
   usageOverrides: [],
 };
 
+const EXACT_USAGE_SOURCE = "usage-db-exact";
+
 async function ensureDbFile() {
   try {
     await fs.access(DB_FILE);
@@ -52,14 +54,16 @@ function normalizeTokenRow(row = {}) {
       promptDetails.cached_tokens ??
       row.prompt_cache_hit_tokens
   );
+  const cacheReadTokens = toFiniteNumber(row.cacheReadTokens ?? row.cache_read_input_tokens);
   const cacheCreationTokens = toFiniteNumber(row.cacheCreationTokens ?? row.cache_creation_input_tokens);
   const reasoningTokens = toFiniteNumber(row.reasoningTokens ?? row.reasoning_tokens ?? completionDetails.reasoning_tokens);
+  const hasSeparateCacheTokens = row.cache_read_input_tokens !== undefined || row.cache_creation_input_tokens !== undefined;
   const totalTokens = toFiniteNumber(
     row.totalTokens ?? row.total_tokens,
     inputTokens +
       outputTokens +
       reasoningTokens +
-      (row.input_tokens !== undefined ? cachedTokens + cacheCreationTokens : 0)
+      (hasSeparateCacheTokens ? cacheReadTokens + cacheCreationTokens : 0)
   );
 
   return {
@@ -70,6 +74,53 @@ function normalizeTokenRow(row = {}) {
     cacheCreationTokens,
     reasoningTokens,
   };
+}
+
+async function recordExactUsageEntry({ apiKey, usageEntry = {}, provider, model, endpoint } = {}) {
+  if (!apiKey?.id || !usageEntry?.tokens) return null;
+
+  const tokens = normalizeTokenRow(usageEntry.tokens);
+  if (tokens.inputTokens <= 0 && tokens.outputTokens <= 0 && tokens.totalTokens <= 0) return null;
+
+  const usageEntryId =
+    usageEntry.id ||
+    crypto
+      .createHash("sha256")
+      .update(
+        JSON.stringify({
+          apiKeyId: apiKey.id,
+          timestamp: usageEntry.timestamp,
+          provider: usageEntry.provider || provider,
+          model: usageEntry.model || model,
+          tokens: usageEntry.tokens,
+        })
+      )
+      .digest("hex");
+
+  const db = await readQuotaDb();
+  const existing = db.usage.find((row) => row.source === EXACT_USAGE_SOURCE && row.usageEntryId === usageEntryId);
+  if (existing) return existing;
+
+  const row = {
+    id: crypto.randomUUID(),
+    usageEntryId,
+    apiKeyId: apiKey.id,
+    source: EXACT_USAGE_SOURCE,
+    provider: provider || usageEntry.provider || "unknown",
+    model: model || usageEntry.model || "unknown",
+    endpoint: endpoint || usageEntry.endpoint || null,
+    inputTokens: tokens.inputTokens,
+    outputTokens: tokens.outputTokens,
+    totalTokens: tokens.totalTokens,
+    cachedTokens: tokens.cachedTokens,
+    cacheCreationTokens: tokens.cacheCreationTokens,
+    reasoningTokens: tokens.reasoningTokens,
+    createdAt: usageEntry.timestamp || usageEntry.createdAt || new Date().toISOString(),
+  };
+
+  db.usage.push(row);
+  await writeQuotaDb(db);
+  return row;
 }
 
 function aggregateUsageRows(rows = []) {
@@ -393,6 +444,11 @@ export async function getTokenApiKeyUsage(apiKeyId, window = "monthly") {
     .filter((row) => new Date(row.createdAt) >= sinceDate)
     .filter((row) => row.provider !== "chat-completions");
   const internalUsage = aggregateUsageRows(internalRows);
+  const exactLedgerIds = new Set(
+    internalRows
+      .filter((row) => row.source === EXACT_USAGE_SOURCE && row.usageEntryId)
+      .map((row) => row.usageEntryId)
+  );
 
   // Exact usage from open-sse usage history (saved with apiKey + real/normalized tokens)
   let exactUsage = aggregateUsageRows();
@@ -405,6 +461,7 @@ export async function getTokenApiKeyUsage(apiKeyId, window = "monthly") {
       const history = await getUsageHistory({ startDate: since });
       const rows = history
         .filter((row) => row.apiKey === apiKeyValue)
+        .filter((row) => !row.id || !exactLedgerIds.has(row.id))
         .map((row) => {
           return normalizeTokenRow(row.tokens || {});
         });
@@ -480,6 +537,11 @@ export async function getTokenApiKeyDailyTrend(apiKeyId, days = 7) {
   const startDate = new Date(Date.now() - (days - 1) * 24 * 60 * 60 * 1000);
 
   const db = await readQuotaDb();
+  const exactLedgerIds = new Set(
+    (db.usage || [])
+      .filter((row) => row.source === EXACT_USAGE_SOURCE && row.usageEntryId)
+      .map((row) => row.usageEntryId)
+  );
   for (const row of db.usage || []) {
     if (row.apiKeyId !== apiKeyId) continue;
     if (row.provider === "chat-completions") continue;
@@ -504,6 +566,7 @@ export async function getTokenApiKeyDailyTrend(apiKeyId, days = 7) {
       const history = await getUsageHistory({ startDate: startDate.toISOString() });
       for (const row of history) {
         if (row.apiKey !== apiKeyValue) continue;
+        if (row.id && exactLedgerIds.has(row.id)) continue;
         const bucket = bucketMap.get(vietnamDayKey(new Date(row.timestamp || 0)));
         if (!bucket) continue;
 
@@ -634,6 +697,7 @@ export async function enforceTokenQuotaAfterUsage({ apiKeyValue, apiKeyId, usage
   if (!apiKey.quota.enabled) return { locked: false };
 
   const limit = apiKey.quota || ensureQuotaShape(apiKey);
+  await recordExactUsageEntry({ apiKey, usageEntry, provider, model, endpoint });
   const usage = await getTokenApiKeyUsage(apiKey.id, limit.window);
   const breach = getQuotaBreach(usage, limit, { inclusive: true });
   if (!breach) return { locked: false, usage, limit };

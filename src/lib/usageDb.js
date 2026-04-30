@@ -3,6 +3,7 @@ import { JSONFile } from "lowdb/node";
 import { EventEmitter } from "events";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { DATA_DIR } from "@/lib/dataDir.js";
 
 const isCloud = typeof caches !== 'undefined' || typeof caches === 'object';
@@ -52,11 +53,17 @@ function normalizeUsageTokens(tokens = {}) {
       promptDetails.cached_tokens ??
       tokens.prompt_cache_hit_tokens
   );
+  const cacheReadTokens = toNumber(tokens.cache_read_input_tokens);
   const cacheCreationTokens = toNumber(tokens.cache_creation_input_tokens);
   const reasoningTokens = toNumber(tokens.reasoning_tokens ?? completionDetails.reasoning_tokens);
+  const hasSeparateCacheTokens =
+    tokens.cache_read_input_tokens !== undefined || tokens.cache_creation_input_tokens !== undefined;
   const totalTokens = toNumber(
     tokens.total_tokens ?? tokens.totalTokens,
-    promptTokens + completionTokens + reasoningTokens
+      promptTokens +
+      completionTokens +
+      reasoningTokens +
+      (hasSeparateCacheTokens ? cacheReadTokens + cacheCreationTokens : 0)
   );
 
   return {
@@ -65,7 +72,7 @@ function normalizeUsageTokens(tokens = {}) {
     completion_tokens: completionTokens,
     total_tokens: totalTokens,
     cached_tokens: cachedTokens,
-    cache_read_input_tokens: cachedTokens,
+    cache_read_input_tokens: cacheReadTokens,
     cache_creation_input_tokens: cacheCreationTokens,
     reasoning_tokens: reasoningTokens,
   };
@@ -454,6 +461,9 @@ export async function saveRequestUsage(entry) {
     if (!entry.timestamp) {
       entry.timestamp = new Date().toISOString();
     }
+    if (!entry.id) {
+      entry.id = crypto.randomUUID();
+    }
 
     // Ensure history array exists
     if (!Array.isArray(db.data.history)) {
@@ -508,6 +518,7 @@ export async function saveRequestUsage(entry) {
  */
 export async function getUsageHistory(filter = {}) {
   const db = await getUsageDb();
+  await db.read();
   let history = db.data.history || [];
 
   // Apply filters

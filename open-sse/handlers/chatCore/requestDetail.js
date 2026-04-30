@@ -33,9 +33,12 @@ export function extractUsageFromResponse(responseBody) {
     const usage = responseBody.usage;
     const inputTokens = toFiniteNumber(usage.input_tokens);
     const outputTokens = toFiniteNumber(usage.output_tokens);
-    const cacheReadTokens = toFiniteNumber(usage.cache_read_input_tokens ?? usage.input_tokens_details?.cached_tokens);
+    const cachedTokens = toFiniteNumber(usage.cache_read_input_tokens ?? usage.input_tokens_details?.cached_tokens);
+    const cacheReadTokens = toFiniteNumber(usage.cache_read_input_tokens);
     const cacheCreationTokens = toFiniteNumber(usage.cache_creation_input_tokens);
     const reasoningTokens = toFiniteNumber(usage.reasoning_tokens ?? usage.output_tokens_details?.reasoning_tokens);
+    const hasSeparateCacheTokens =
+      usage.cache_read_input_tokens !== undefined || usage.cache_creation_input_tokens !== undefined;
     return {
       input_tokens: inputTokens,
       output_tokens: outputTokens,
@@ -44,9 +47,12 @@ export function extractUsageFromResponse(responseBody) {
       total_tokens:
         usage.total_tokens ??
         usage.totalTokens ??
-        inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens + reasoningTokens,
-      cached_tokens: cacheReadTokens,
-      cache_read_input_tokens: cacheReadTokens,
+        inputTokens +
+          outputTokens +
+          reasoningTokens +
+          (hasSeparateCacheTokens ? cacheReadTokens + cacheCreationTokens : 0),
+      cached_tokens: cachedTokens,
+      cache_read_input_tokens: usage.cache_read_input_tokens,
       cache_creation_input_tokens: cacheCreationTokens,
       reasoning_tokens: reasoningTokens,
       prompt_tokens_details: usage.input_tokens_details,
@@ -67,7 +73,7 @@ export function extractUsageFromResponse(responseBody) {
         usage.total_tokens ??
         promptTokens + completionTokens + reasoningTokens,
       cached_tokens: usage.cached_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens,
-      cache_read_input_tokens: usage.cache_read_input_tokens ?? usage.prompt_tokens_details?.cached_tokens,
+      cache_read_input_tokens: usage.cache_read_input_tokens,
       cache_creation_input_tokens: usage.cache_creation_input_tokens,
       reasoning_tokens: reasoningTokens,
       prompt_tokens_details: usage.prompt_tokens_details,
@@ -126,8 +132,11 @@ export async function saveUsageStats({ provider, model, tokens, connectionId, ap
       promptDetails.cached_tokens ??
       tokens.prompt_cache_hit_tokens
   );
+  const cacheReadTokens = toFiniteNumber(tokens.cache_read_input_tokens);
   const cacheCreationTokens = toFiniteNumber(tokens.cache_creation_input_tokens);
   const reasoningTokens = toFiniteNumber(tokens.reasoning_tokens ?? completionDetails.reasoning_tokens);
+  const hasSeparateCacheTokens =
+    tokens.cache_read_input_tokens !== undefined || tokens.cache_creation_input_tokens !== undefined;
 
   if (inTokens === 0 && outTokens === 0) return null;
 
@@ -144,9 +153,9 @@ export async function saveUsageStats({ provider, model, tokens, connectionId, ap
       inTokens +
         outTokens +
         reasoningTokens +
-        (tokens.input_tokens !== undefined ? cachedTokens + cacheCreationTokens : 0),
+        (hasSeparateCacheTokens ? cacheReadTokens + cacheCreationTokens : 0),
     cached_tokens: cachedTokens,
-    cache_read_input_tokens: cachedTokens,
+    cache_read_input_tokens: cacheReadTokens,
     cache_creation_input_tokens: cacheCreationTokens,
     reasoning_tokens: reasoningTokens,
     prompt_tokens_details: promptDetails,

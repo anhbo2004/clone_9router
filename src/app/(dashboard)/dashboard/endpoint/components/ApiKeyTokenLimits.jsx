@@ -18,6 +18,8 @@ function percent(used, limit) {
   return Number(limit || 0) > 0 ? Math.min(100, Math.round((Number(used || 0) / Number(limit || 0)) * 100)) : 0;
 }
 
+const AUTO_REFRESH_MS = 60_000;
+
 export default function ApiKeyTokenLimits() {
   const [keys, setKeys] = useState([]);
   const [secret, setSecret] = useState("");
@@ -73,7 +75,7 @@ export default function ApiKeyTokenLimits() {
   useEffect(() => {
     const t = setInterval(() => {
       load();
-    }, 1000);
+    }, AUTO_REFRESH_MS);
     return () => clearInterval(t);
   }, [dirtyRows]);
 
@@ -219,6 +221,7 @@ export default function ApiKeyTokenLimits() {
           <h2 className="text-xl font-semibold">API Key Token Limits</h2>
           <p className="text-xs text-neutral-500">
             {liveConnected ? "Live updates connected" : "Live updates reconnecting"}
+            {" | Auto refresh: 1m"}
             {lastUpdatedAt ? ` | Last update: ${new Date(lastUpdatedAt).toLocaleTimeString()}` : ""}
           </p>
           <p className="text-sm text-neutral-400">Giới hạn token theo từng API key. Tổng đã dùng: {fmt(totalUsed)} tokens.</p>

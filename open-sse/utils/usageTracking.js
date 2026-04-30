@@ -139,6 +139,12 @@ export function normalizeUsage(usage) {
   if (usage?.completion_tokens_details && typeof usage.completion_tokens_details === "object") {
     normalized.completion_tokens_details = usage.completion_tokens_details;
   }
+  if (usage?.input_tokens_details && typeof usage.input_tokens_details === "object") {
+    normalized.input_tokens_details = usage.input_tokens_details;
+  }
+  if (usage?.output_tokens_details && typeof usage.output_tokens_details === "object") {
+    normalized.output_tokens_details = usage.output_tokens_details;
+  }
 
   if (Object.keys(normalized).length === 0) return null;
   return normalized;
@@ -206,7 +212,9 @@ export function extractUsage(chunk) {
       total_tokens: usage.total_tokens,
       cached_tokens: cachedTokens,
       reasoning_tokens: usage.output_tokens_details?.reasoning_tokens,
-      prompt_tokens_details: cachedTokens ? { cached_tokens: cachedTokens } : undefined
+      prompt_tokens_details: cachedTokens ? { cached_tokens: cachedTokens } : undefined,
+      input_tokens_details: usage.input_tokens_details,
+      output_tokens_details: usage.output_tokens_details
     });
   }
 
@@ -330,6 +338,7 @@ export function logUsage(provider, usage, model = null, connectionId = null, api
 
   // Add cache info if present (unified from different formats)
   const cacheRead = usage.cache_read_input_tokens || usage.cached_tokens || usage.prompt_tokens_details?.cached_tokens;
+  const separateCacheRead = usage.cache_read_input_tokens || 0;
   if (cacheRead) msg += ` | cache_read=${cacheRead}`;
 
   const cacheCreation = usage.cache_creation_input_tokens;
@@ -343,11 +352,19 @@ export function logUsage(provider, usage, model = null, connectionId = null, api
   if (options.persist === false) return;
 
   // Save to usage DB
+  const hasSeparateCacheTokens =
+    usage.cache_read_input_tokens !== undefined || usage.cache_creation_input_tokens !== undefined;
   const tokens = {
     prompt_tokens: inTokens,
     completion_tokens: outTokens,
-    total_tokens: usage.total_tokens ?? (inTokens + outTokens + (reasoning || 0)),
-    cache_read_input_tokens: cacheRead || 0,
+    total_tokens:
+      usage.total_tokens ??
+      inTokens +
+        outTokens +
+        (reasoning || 0) +
+        (hasSeparateCacheTokens ? separateCacheRead + (cacheCreation || 0) : 0),
+    cached_tokens: cacheRead || 0,
+    cache_read_input_tokens: separateCacheRead,
     cache_creation_input_tokens: cacheCreation || 0,
     reasoning_tokens: reasoning || 0
   };
