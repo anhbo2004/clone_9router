@@ -12,14 +12,14 @@ docker build -t 9router .
 
 ```bash
 docker run --rm \
-  -p 20128:20128 \
+  -p 20129:20129 \
   -v "$HOME/.9router:/app/data" \
   -e DATA_DIR=/app/data \
   --name 9router \
   9router
 ```
 
-The app listens on port `20128` in the container.
+The app listens on port `20129` in the container.
 
 ## What the volume does
 
@@ -53,7 +53,7 @@ docker stop 9router
 
 ```bash
 docker run -d \
-  -p 20128:20128 \
+  -p 20129:20129 \
   -v "$HOME/.9router:/app/data" \
   -e DATA_DIR=/app/data \
   --name 9router \
@@ -74,10 +74,10 @@ Example:
 
 ```bash
 docker run --rm \
-  -p 20128:20128 \
+  -p 20129:20129 \
   -v "$HOME/.9router:/app/data" \
   -e DATA_DIR=/app/data \
-  -e PORT=20128 \
+  -e PORT=20129 \
   -e HOSTNAME=0.0.0.0 \
   -e DEBUG=true \
   --name 9router \

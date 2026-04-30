@@ -26,7 +26,7 @@ export const UPDATER_CONFIG = {
   waitForExitMinMs: 3000,
   waitForExitMaxMs: 15000,
   waitForExitCheckMs: 500,
-  appPort: 20128,
+  appPort: 20129,
 };
 
 // Theme configuration

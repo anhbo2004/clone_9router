@@ -102,6 +102,10 @@ export default function ProvidersPage() {
     useState(false);
   const [testingMode, setTestingMode] = useState(null);
   const [testResults, setTestResults] = useState(null);
+  const [showCodexBulkModal, setShowCodexBulkModal] = useState(false);
+  const [codexBulkLoading, setCodexBulkLoading] = useState(false);
+  const [codexBulkResults, setCodexBulkResults] = useState(null);
+  const [codexAccountsText, setCodexAccountsText] = useState("");
   const notify = useNotificationStore();
 
   useEffect(() => {
@@ -216,6 +220,29 @@ export default function ProvidersPage() {
     }
   };
 
+  const handleCodexBulkLogin = async () => {
+    setCodexBulkLoading(true);
+    setCodexBulkResults(null);
+    try {
+      const res = await fetch("/api/oauth/codex/bulk-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountsText: codexAccountsText, headless: false }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        notify.error(data.error || "Bulk login failed");
+        return;
+      }
+      setCodexBulkResults(data);
+      notify.success(`Bulk done: ${data.summary.ok}/${data.summary.total} success`);
+    } catch (error) {
+      notify.error(error?.message || "Bulk login failed");
+    } finally {
+      setCodexBulkLoading(false);
+    }
+  };
+
   const compatibleProviders = providerNodes
     .filter((node) => node.type === "openai-compatible")
     .map((node) => ({
@@ -253,6 +280,14 @@ export default function ProvidersPage() {
             OAuth Providers
           </h2>
           <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              icon="groups"
+              onClick={() => setShowCodexBulkModal(true)}
+            >
+              Bulk Codex Auto Login
+            </Button>
             <ModelAvailabilityBadge />
             <button
               onClick={() => handleBatchTest("oauth")}
@@ -518,6 +553,74 @@ export default function ProvidersPage() {
           </div>
         </div>
       )}
+
+      <Modal
+        isOpen={showCodexBulkModal}
+        title="Bulk Codex Auto Login"
+        onClose={() => !codexBulkLoading && setShowCodexBulkModal(false)}
+      >
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-text-muted">
+            Format per line: <code>email | password | 2fa_secret</code>
+          </p>
+          <textarea
+            value={codexAccountsText}
+            onChange={(e) => setCodexAccountsText(e.target.value)}
+            placeholder={"user1@example.com | pass123 | ABCDEFGHIJKLMNOP\nuser2@example.com | pass456 | QWERTYUIOPASDFGH"}
+            className="min-h-[180px] w-full rounded-lg border border-border bg-bg p-3 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-primary/40"
+          />
+          <div className="flex gap-2">
+            <Button
+              onClick={handleCodexBulkLogin}
+              disabled={!codexAccountsText.trim() || codexBulkLoading}
+              fullWidth
+            >
+              {codexBulkLoading ? "Running..." : "Start Auto Login"}
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => setShowCodexBulkModal(false)}
+              disabled={codexBulkLoading}
+              fullWidth
+            >
+              Close
+            </Button>
+          </div>
+
+          {codexBulkResults?.summary && (
+            <div className="rounded-lg border border-border p-3 text-sm">
+              <div>Total: {codexBulkResults.summary.total}</div>
+              <div className="text-green-500">Success: {codexBulkResults.summary.ok}</div>
+              <div className="text-red-500">Failed: {codexBulkResults.summary.failed}</div>
+            </div>
+          )}
+
+          {Array.isArray(codexBulkResults?.results) && codexBulkResults.results.length > 0 && (
+            <div className="max-h-[220px] overflow-auto rounded-lg border border-border">
+              <table className="w-full text-xs">
+                <thead className="bg-bg-secondary">
+                  <tr>
+                    <th className="p-2 text-left">Row</th>
+                    <th className="p-2 text-left">Email</th>
+                    <th className="p-2 text-left">Result</th>
+                    <th className="p-2 text-left">Message</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {codexBulkResults.results.map((r) => (
+                    <tr key={`${r.row}-${r.email}`} className="border-t border-border">
+                      <td className="p-2">{r.row}</td>
+                      <td className="p-2">{r.email}</td>
+                      <td className={`p-2 ${r.ok ? "text-green-500" : "text-red-500"}`}>{r.ok ? "OK" : "FAIL"}</td>
+                      <td className="p-2">{r.message}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }

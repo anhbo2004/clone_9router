@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import PropTypes from "prop-types";
 import { Card, Button, Input, Modal, CardSkeleton, Toggle } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+import ApiKeyTokenLimits from "./components/ApiKeyTokenLimits";
 
 const TUNNEL_BENEFITS = [
   { icon: "public", title: "Access Anywhere", desc: "Use your API from any network" },
@@ -930,6 +931,8 @@ export default function APIPageClient({ machineId }) {
           </div>
         )}
       </Card>
+
+      <ApiKeyTokenLimits />
 
       {/* Add Key Modal */}
       <Modal
