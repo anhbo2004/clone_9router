@@ -9,6 +9,7 @@ const DB_FILE = path.join(DATA_DIR, ".9router-token-quota.json");
 
 const DEFAULT_DB = {
   usage: [],
+  usageOverrides: [],
 };
 
 async function ensureDbFile() {
@@ -24,6 +25,7 @@ async function readQuotaDb() {
   const raw = await fs.readFile(DB_FILE, "utf8");
   const db = JSON.parse(raw || "{}");
   db.usage ||= [];
+  db.usageOverrides ||= [];
   return db;
 }
 
@@ -153,7 +155,7 @@ export async function getTokenApiKeyUsage(apiKeyId, window = "monthly") {
   const db = await readQuotaDb();
   const since = quotaWindowStart(window);
 
-  return db.usage
+  const usage = db.usage
     .filter((row) => row.apiKeyId === apiKeyId)
     .filter((row) => new Date(row.createdAt) >= new Date(since))
     .reduce(
@@ -166,6 +168,41 @@ export async function getTokenApiKeyUsage(apiKeyId, window = "monthly") {
       },
       { requests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 }
     );
+
+  const override = db.usageOverrides
+    .filter((row) => row.apiKeyId === apiKeyId && row.window === window)
+    .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))[0];
+
+  if (!override) return usage;
+
+  return {
+    ...usage,
+    inputTokens: Number(override.inputTokens ?? usage.inputTokens ?? 0),
+    outputTokens: Number(override.outputTokens ?? usage.outputTokens ?? 0),
+    totalTokens: Number(override.totalTokens ?? usage.totalTokens ?? 0),
+  };
+}
+
+export async function setTokenApiKeyUsage({ apiKeyId, window = "monthly", totalTokens, inputTokens, outputTokens }) {
+  if (!apiKeyId) return null;
+
+  const db = await readQuotaDb();
+  const idx = db.usageOverrides.findIndex((row) => row.apiKeyId === apiKeyId && row.window === window);
+  const payload = {
+    id: idx >= 0 ? db.usageOverrides[idx].id : crypto.randomUUID(),
+    apiKeyId,
+    window,
+    inputTokens: Number(inputTokens ?? 0),
+    outputTokens: Number(outputTokens ?? 0),
+    totalTokens: Number(totalTokens ?? 0),
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (idx >= 0) db.usageOverrides[idx] = payload;
+  else db.usageOverrides.push(payload);
+
+  await writeQuotaDb(db);
+  return payload;
 }
 
 export async function checkTokenQuota({ apiKey, body }) {

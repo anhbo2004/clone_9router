@@ -13,6 +13,8 @@ export default function ApiKeyTokenLimits() {
   const [copiedId, setCopiedId] = useState("");
   const [testingId, setTestingId] = useState("");
   const [testMessage, setTestMessage] = useState("");
+  const [rowEdits, setRowEdits] = useState({});
+  const [savingId, setSavingId] = useState("");
   const [form, setForm] = useState({
     name: "",
     window: "monthly",
@@ -25,7 +27,19 @@ export default function ApiKeyTokenLimits() {
   async function load() {
     const res = await fetch("/api/dashboard/token-limits/api-keys", { cache: "no-store" });
     const data = await res.json();
-    setKeys(data.keys || []);
+    const nextKeys = data.keys || [];
+    setKeys(nextKeys);
+    setRowEdits(
+      Object.fromEntries(
+        nextKeys.map((key) => [
+          key.id,
+          {
+            used: Number(key.usage?.totalTokens || 0),
+            limit: Number(key.quota?.maxTotalTokens || 0),
+          },
+        ])
+      )
+    );
   }
 
   useEffect(() => {
@@ -70,6 +84,30 @@ export default function ApiKeyTokenLimits() {
       body: JSON.stringify(patch),
     });
     await load();
+  }
+
+  function getRowEdit(key) {
+    return rowEdits[key.id] || {
+      used: Number(key.usage?.totalTokens || 0),
+      limit: Number(key.quota?.maxTotalTokens || 0),
+    };
+  }
+
+  function onChangeRow(id, field, value) {
+    setRowEdits((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), [field]: value } }));
+  }
+
+  async function saveRow(key) {
+    const edit = getRowEdit(key);
+    setSavingId(key.id);
+    try {
+      await patchKey(key.id, {
+        quota: { ...key.quota, maxTotalTokens: Number(edit.limit || 0) },
+        usage: { totalTokens: Number(edit.used || 0) },
+      });
+    } finally {
+      setSavingId("");
+    }
   }
 
   async function deleteKey(id) {
@@ -163,6 +201,7 @@ export default function ApiKeyTokenLimits() {
             {keys.map((key) => {
               const used = Number(key.usage?.totalTokens || 0);
               const limit = Number(key.quota?.maxTotalTokens || 0);
+              const edit = getRowEdit(key);
               const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
               return (
                 <tr key={key.id} className="border-t border-neutral-800">
@@ -179,12 +218,33 @@ export default function ApiKeyTokenLimits() {
                   <td className="p-3">
                     <div>{fmt(used)} / {limit ? fmt(limit) : "∞"}</div>
                     <div className="mt-1 h-2 rounded bg-neutral-800"><div className="h-2 rounded bg-orange-600" style={{ width: `${pct}%` }} /></div>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <input
+                        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
+                        type="number"
+                        min="0"
+                        value={edit.used}
+                        onChange={(e) => onChangeRow(key.id, "used", e.target.value)}
+                        placeholder="Used"
+                      />
+                      <input
+                        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
+                        type="number"
+                        min="0"
+                        value={edit.limit}
+                        onChange={(e) => onChangeRow(key.id, "limit", e.target.value)}
+                        placeholder="Limit"
+                      />
+                    </div>
                   </td>
                   <td className="p-3 text-neutral-300">{key.allowedModels?.length ? key.allowedModels.join(", ") : "All"}</td>
                   <td className="p-3">{key.enabled ? <span className="text-green-400">Enabled</span> : <span className="text-red-400">Disabled</span>}</td>
                   <td className="space-x-2 p-3 text-right">
                     <button className="rounded bg-blue-700 px-3 py-1 hover:bg-blue-600 disabled:opacity-60" disabled={testingId === key.id} onClick={() => quickTest(key)}>
                       {testingId === key.id ? "Testing..." : "Quick test"}
+                    </button>
+                    <button className="rounded bg-emerald-700 px-3 py-1 hover:bg-emerald-600 disabled:opacity-60" disabled={savingId === key.id} onClick={() => saveRow(key)}>
+                      {savingId === key.id ? "Saving..." : "Save Used/Limit"}
                     </button>
                     <button className="rounded bg-neutral-800 px-3 py-1 hover:bg-neutral-700" onClick={() => patchKey(key.id, { enabled: !key.enabled })}>{key.enabled ? "Disable" : "Enable"}</button>
                     <button className="rounded bg-red-700 px-3 py-1 hover:bg-red-600" onClick={() => deleteKey(key.id)}>Delete</button>

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteTokenApiKey, getTokenApiKeyUsage, updateTokenApiKey } from "@/lib/tokenQuotaStore";
+import { deleteTokenApiKey, getTokenApiKeyUsage, setTokenApiKeyUsage, updateTokenApiKey } from "@/lib/tokenQuotaStore";
 
 export async function GET(req, { params }) {
   const { id } = await params;
@@ -14,6 +14,15 @@ export async function PATCH(req, { params }) {
   const body = await req.json();
   const key = await updateTokenApiKey(id, body);
   if (!key) return NextResponse.json({ error: "API key not found" }, { status: 404 });
+  if (body?.usage && typeof body.usage === "object") {
+    await setTokenApiKeyUsage({
+      apiKeyId: id,
+      window: key.quota?.window || "monthly",
+      totalTokens: Number(body.usage.totalTokens ?? 0),
+      inputTokens: Number(body.usage.inputTokens ?? 0),
+      outputTokens: Number(body.usage.outputTokens ?? 0),
+    });
+  }
   return NextResponse.json({ key });
 }
 
