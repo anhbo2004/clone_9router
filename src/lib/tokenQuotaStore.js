@@ -7,6 +7,7 @@ import { DATA_DIR } from "@/lib/dataDir";
 
 const TOKEN_QUOTA_DATA_DIR = process.env.TOKEN_QUOTA_DATA_DIR || DATA_DIR;
 const DB_FILE = path.join(TOKEN_QUOTA_DATA_DIR, ".9router-token-quota.json");
+const VIETNAM_UTC_OFFSET_MS = 7 * 60 * 60 * 1000;
 
 const DEFAULT_DB = {
   usage: [],
@@ -61,6 +62,16 @@ function ensureQuotaShape(key) {
     maxTotalTokens: Number(quota.maxTotalTokens || 1000000),
     action: quota.action || "reject",
     fallbackModel: quota.fallbackModel || "",
+  };
+}
+
+function shapeTokenApiKey(key) {
+  if (!key) return null;
+  return {
+    ...key,
+    enabled: key.isActive !== false,
+    quota: ensureQuotaShape(key),
+    allowedModels: Array.isArray(key.allowedModels) ? key.allowedModels : [],
   };
 }
 
@@ -136,24 +147,119 @@ async function lockTokenApiKeyForQuota(apiKey, usage, breach, source = {}) {
   };
 }
 
-export function quotaWindowStart(window) {
-  const now = new Date();
-  const start = new Date(now);
+function getVietnamDateParts(date = new Date()) {
+  const vnDate = new Date(date.getTime() + VIETNAM_UTC_OFFSET_MS);
+  return {
+    year: vnDate.getUTCFullYear(),
+    month: vnDate.getUTCMonth(),
+    day: vnDate.getUTCDate(),
+    weekday: vnDate.getUTCDay() || 7,
+  };
+}
 
+function vietnamMidnightUtcIso({ year, month, day }) {
+  return new Date(Date.UTC(year, month, day, -7, 0, 0, 0)).toISOString();
+}
+
+function addToVietnamDate({ year, month, day }, amount) {
+  const vnDate = new Date(Date.UTC(year, month, day));
+  vnDate.setUTCDate(vnDate.getUTCDate() + amount);
+  return {
+    year: vnDate.getUTCFullYear(),
+    month: vnDate.getUTCMonth(),
+    day: vnDate.getUTCDate(),
+  };
+}
+
+export function quotaWindowStart(window, at = new Date()) {
   if (window === "rolling_5h") {
-    start.setHours(start.getHours() - 5);
-  } else if (window === "daily") {
-    start.setHours(0, 0, 0, 0);
-  } else if (window === "weekly") {
-    const day = start.getDay() || 7;
-    start.setDate(start.getDate() - day + 1);
-    start.setHours(0, 0, 0, 0);
-  } else {
-    start.setDate(1);
-    start.setHours(0, 0, 0, 0);
+    return new Date(at.getTime() - 5 * 60 * 60 * 1000).toISOString();
   }
 
-  return start.toISOString();
+  const parts = getVietnamDateParts(at);
+
+  if (window === "daily") {
+    return vietnamMidnightUtcIso(parts);
+  }
+
+  if (window === "weekly") {
+    const vnDate = new Date(Date.UTC(parts.year, parts.month, parts.day));
+    vnDate.setUTCDate(vnDate.getUTCDate() - parts.weekday + 1);
+    return vietnamMidnightUtcIso({
+      year: vnDate.getUTCFullYear(),
+      month: vnDate.getUTCMonth(),
+      day: vnDate.getUTCDate(),
+    });
+  }
+
+  return vietnamMidnightUtcIso({ year: parts.year, month: parts.month, day: 1 });
+}
+
+export function quotaWindowEnd(window, at = new Date()) {
+  if (window === "rolling_5h") {
+    return new Date(at.getTime() + 5 * 60 * 60 * 1000).toISOString();
+  }
+
+  const parts = getVietnamDateParts(at);
+
+  if (window === "daily") {
+    return vietnamMidnightUtcIso(addToVietnamDate(parts, 1));
+  }
+
+  if (window === "weekly") {
+    const vnDate = new Date(Date.UTC(parts.year, parts.month, parts.day));
+    vnDate.setUTCDate(vnDate.getUTCDate() - parts.weekday + 8);
+    return vietnamMidnightUtcIso({
+      year: vnDate.getUTCFullYear(),
+      month: vnDate.getUTCMonth(),
+      day: vnDate.getUTCDate(),
+    });
+  }
+
+  return vietnamMidnightUtcIso({ year: parts.year, month: parts.month + 1, day: 1 });
+}
+
+function formatDuration(ms) {
+  const safeMs = Math.max(0, Number(ms || 0));
+  const totalSeconds = Math.ceil(safeMs / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+async function refreshQuotaLockState(rawKey) {
+  const key = shapeTokenApiKey(rawKey);
+  if (!key || key.disabledReason !== "token_quota_exceeded") return key;
+
+  const window = key.quota?.window || "daily";
+  const windowStart = quotaWindowStart(window);
+  const disabledAt = new Date(key.disabledAt || key.quotaExceededAt || 0).getTime();
+  const resetAt = new Date(windowStart).getTime();
+
+  if (key.enabled === false && disabledAt > 0 && disabledAt < resetAt) {
+    const updated = await updateApiKey(key.id, {
+      isActive: true,
+      disabledReason: null,
+      disabledMessage: null,
+      disabledAt: null,
+      quotaExceededAt: null,
+      quotaExceededMetric: null,
+      quotaExceededUsage: null,
+      quotaExceededLimit: null,
+      quotaExceededSource: null,
+      lastQuotaResetAt: new Date().toISOString(),
+      lastQuotaResetWindowStart: windowStart,
+    });
+    return shapeTokenApiKey(updated);
+  }
+
+  return key;
 }
 
 export function estimateTokens(payload) {
@@ -173,12 +279,7 @@ export function estimateOutputTokens(body = {}) {
 
 export async function listTokenApiKeys() {
   const keys = await getApiKeys();
-  return keys.map((k) => ({
-    ...k,
-    enabled: k.isActive !== false,
-    quota: ensureQuotaShape(k),
-    allowedModels: Array.isArray(k.allowedModels) ? k.allowedModels : [],
-  }));
+  return Promise.all(keys.map((k) => refreshQuotaLockState(k)));
 }
 
 export async function createTokenApiKey(input = {}) {
@@ -190,10 +291,7 @@ export async function createTokenApiKey(input = {}) {
     quota: ensureQuotaShape({ quota: input.quota || {} }),
   };
   const updated = await updateApiKey(apiKey.id, patch);
-  return {
-    ...updated,
-    enabled: updated.isActive !== false,
-  };
+  return shapeTokenApiKey(updated);
 }
 
 export async function updateTokenApiKey(id, patch = {}) {
@@ -221,12 +319,7 @@ export async function updateTokenApiKey(id, patch = {}) {
   const updated = await updateApiKey(id, updateData);
   if (!updated) return null;
 
-  return {
-    ...updated,
-    enabled: updated.isActive !== false,
-    quota: ensureQuotaShape(updated),
-    allowedModels: Array.isArray(updated.allowedModels) ? updated.allowedModels : [],
-  };
+  return shapeTokenApiKey(updated);
 }
 
 export async function deleteTokenApiKey(id) {
@@ -241,12 +334,7 @@ export async function findTokenApiKeyFromAuth(authHeader) {
   const key = keys.find((item) => item.key === secret);
   if (!key) return null;
 
-  return {
-    ...key,
-    enabled: key.isActive !== false,
-    quota: ensureQuotaShape(key),
-    allowedModels: Array.isArray(key.allowedModels) ? key.allowedModels : [],
-  };
+  return refreshQuotaLockState(key);
 }
 
 export async function findTokenApiKeyBySecret(secret) {
@@ -257,12 +345,7 @@ export async function findTokenApiKeyBySecret(secret) {
   const key = keys.find((item) => item.key === value);
   if (!key) return null;
 
-  return {
-    ...key,
-    enabled: key.isActive !== false,
-    quota: ensureQuotaShape(key),
-    allowedModels: Array.isArray(key.allowedModels) ? key.allowedModels : [],
-  };
+  return refreshQuotaLockState(key);
 }
 
 export async function getTokenApiKeyUsage(apiKeyId, window = "monthly") {
@@ -314,6 +397,7 @@ export async function getTokenApiKeyUsage(apiKeyId, window = "monthly") {
 
   const override = db.usageOverrides
     .filter((row) => row.apiKeyId === apiKeyId && row.window === window)
+    .filter((row) => row.windowStart === since || (!row.windowStart && new Date(row.updatedAt || row.createdAt || 0) >= sinceDate))
     .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))[0];
 
   if (!override) return usage;
@@ -335,6 +419,7 @@ export async function setTokenApiKeyUsage({ apiKeyId, window = "monthly", totalT
     id: idx >= 0 ? db.usageOverrides[idx].id : crypto.randomUUID(),
     apiKeyId,
     window,
+    windowStart: quotaWindowStart(window),
     inputTokens: Number(inputTokens ?? 0),
     outputTokens: Number(outputTokens ?? 0),
     totalTokens: Number(totalTokens ?? 0),
@@ -503,6 +588,9 @@ export async function getTokenApiKeyStatusBySecret(secret) {
   const breach = getQuotaBreach(usage, limit, { inclusive: true });
   let effectiveEnabled = apiKey.enabled;
   let disabledMessage = apiKey.disabledMessage;
+  const now = Date.now();
+  const resetAt = quotaWindowEnd(window);
+  const resetInMs = Math.max(0, new Date(resetAt).getTime() - now);
 
   if (breach && apiKey.enabled !== false) {
     const lock = await lockTokenApiKeyForQuota(apiKey, usage, breach, { provider: "status-check" });
@@ -515,12 +603,13 @@ export async function getTokenApiKeyStatusBySecret(secret) {
     key: {
       id: apiKey.id,
       name: apiKey.name,
-      key: apiKey.key,
       enabled: effectiveEnabled,
       createdAt: apiKey.createdAt,
       allowedModels: apiKey.allowedModels || [],
       quota: limit,
       disabledMessage,
+      disabledReason: apiKey.disabledReason || null,
+      disabledAt: apiKey.disabledAt || null,
     },
     usage,
     status: {
@@ -529,7 +618,13 @@ export async function getTokenApiKeyStatusBySecret(secret) {
       breach,
       window,
       windowStart: quotaWindowStart(window),
+      resetAt,
+      resetInMs,
+      resetIn: formatDuration(resetInMs),
+      timezone: "Asia/Ho_Chi_Minh",
       remainingInputTokens: remainingInput,
+      remainingOutputTokens:
+        limit.maxOutputTokens > 0 ? Math.max(0, Number(limit.maxOutputTokens) - Number(usage.outputTokens || 0)) : null,
       remainingTotalTokens: remainingTotal,
     },
   };

@@ -17,7 +17,7 @@ export default function ApiKeyTokenLimits() {
   const [savingId, setSavingId] = useState("");
   const [form, setForm] = useState({
     name: "",
-    window: "monthly",
+    window: "daily",
     maxTotalTokens: 1000000,
     maxInputTokens: 0,
     maxOutputTokens: 0,

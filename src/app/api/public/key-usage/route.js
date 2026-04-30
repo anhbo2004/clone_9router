@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
 import { getTokenApiKeyStatusBySecret } from "@/lib/tokenQuotaStore";
 
-export async function GET(req) {
+async function handleCheck(apiKey) {
   try {
-    const { searchParams } = new URL(req.url);
-    const apiKey = searchParams.get("apiKey") || "";
-
     if (!apiKey.trim()) {
       return NextResponse.json({ error: "apiKey is required" }, { status: 400 });
     }
@@ -19,4 +16,14 @@ export async function GET(req) {
   } catch (error) {
     return NextResponse.json({ error: error?.message || "Failed to check key usage" }, { status: 500 });
   }
+}
+
+export async function GET(req) {
+  const { searchParams } = new URL(req.url);
+  return handleCheck(searchParams.get("apiKey") || "");
+}
+
+export async function POST(req) {
+  const body = await req.json().catch(() => ({}));
+  return handleCheck(body?.apiKey || "");
 }
