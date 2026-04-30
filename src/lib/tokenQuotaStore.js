@@ -410,6 +410,89 @@ export async function getTokenApiKeyUsage(apiKeyId, window = "monthly") {
   };
 }
 
+function vietnamDayKey(date = new Date()) {
+  const vnDate = new Date(date.getTime() + VIETNAM_UTC_OFFSET_MS);
+  const year = vnDate.getUTCFullYear();
+  const month = String(vnDate.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(vnDate.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function trendLabel(date = new Date()) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    month: "short",
+    day: "numeric",
+  }).format(date);
+}
+
+function getLastVietnamDays(count = 7) {
+  const today = new Date(Date.now() + VIETNAM_UTC_OFFSET_MS);
+  today.setUTCHours(0, 0, 0, 0);
+
+  return Array.from({ length: count }, (_, index) => {
+    const day = new Date(today);
+    day.setUTCDate(today.getUTCDate() - (count - 1 - index));
+    const utcDate = new Date(day.getTime() - VIETNAM_UTC_OFFSET_MS);
+    return {
+      date: vietnamDayKey(utcDate),
+      label: trendLabel(utcDate),
+      requests: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+    };
+  });
+}
+
+export async function getTokenApiKeyDailyTrend(apiKeyId, days = 7) {
+  const buckets = getLastVietnamDays(days);
+  const bucketMap = new Map(buckets.map((bucket) => [bucket.date, bucket]));
+  const startDate = new Date(Date.now() - (days - 1) * 24 * 60 * 60 * 1000);
+
+  const db = await readQuotaDb();
+  for (const row of db.usage || []) {
+    if (row.apiKeyId !== apiKeyId) continue;
+    if (row.provider === "chat-completions") continue;
+    const createdAt = new Date(row.createdAt || 0);
+    if (createdAt < startDate) continue;
+
+    const bucket = bucketMap.get(vietnamDayKey(createdAt));
+    if (!bucket) continue;
+    bucket.requests += 1;
+    bucket.inputTokens += Number(row.inputTokens || 0);
+    bucket.outputTokens += Number(row.outputTokens || 0);
+    bucket.totalTokens += Number(row.totalTokens ?? Number(row.inputTokens || 0) + Number(row.outputTokens || 0));
+  }
+
+  try {
+    const keys = await getApiKeys();
+    const keyObj = keys.find((k) => k.id === apiKeyId);
+    const apiKeyValue = keyObj?.key;
+    if (apiKeyValue) {
+      const { getUsageHistory } = await import("@/lib/usageDb");
+      const history = await getUsageHistory({ startDate: startDate.toISOString() });
+      for (const row of history) {
+        if (row.apiKey !== apiKeyValue) continue;
+        const bucket = bucketMap.get(vietnamDayKey(new Date(row.timestamp || 0)));
+        if (!bucket) continue;
+
+        const inputTokens = Number(row.tokens?.prompt_tokens || row.tokens?.input_tokens || 0);
+        const outputTokens = Number(row.tokens?.completion_tokens || row.tokens?.output_tokens || 0);
+        const reasoningTokens = Number(row.tokens?.reasoning_tokens || 0);
+        bucket.requests += 1;
+        bucket.inputTokens += inputTokens;
+        bucket.outputTokens += outputTokens;
+        bucket.totalTokens += Number(row.tokens?.total_tokens ?? inputTokens + outputTokens + reasoningTokens);
+      }
+    }
+  } catch {
+    // Trend falls back to internal token-quota rows only.
+  }
+
+  return buckets;
+}
+
 export async function setTokenApiKeyUsage({ apiKeyId, window = "monthly", totalTokens, inputTokens, outputTokens }) {
   if (!apiKeyId) return null;
 
@@ -576,6 +659,7 @@ export async function getTokenApiKeyStatusBySecret(secret) {
 
   const window = apiKey.quota?.window || "monthly";
   const usage = await getTokenApiKeyUsage(apiKey.id, window);
+  const dailyTrend = await getTokenApiKeyDailyTrend(apiKey.id, 7);
   const limit = apiKey.quota || ensureQuotaShape(apiKey);
   const remainingInput =
     limit.maxInputTokens > 0 ? Math.max(0, Number(limit.maxInputTokens) - Number(usage.inputTokens || 0)) : null;
@@ -612,6 +696,7 @@ export async function getTokenApiKeyStatusBySecret(secret) {
       disabledAt: apiKey.disabledAt || null,
     },
     usage,
+    dailyTrend,
     status: {
       active: effectiveEnabled,
       exceeded,
