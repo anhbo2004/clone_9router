@@ -73,7 +73,7 @@ export default function ApiKeyTokenLimits() {
   useEffect(() => {
     const t = setInterval(() => {
       load();
-    }, 2000);
+    }, 1000);
     return () => clearInterval(t);
   }, [dirtyRows]);
 
