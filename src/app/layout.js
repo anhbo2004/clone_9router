@@ -1,4 +1,5 @@
 import { Inter } from "next/font/google";
+import "@xyflow/react/dist/style.css";
 import "./globals.css";
 import { ThemeProvider } from "@/shared/components/ThemeProvider";
 import "@/lib/initCloudSync"; // Auto-initialize cloud sync
