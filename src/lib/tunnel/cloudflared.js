@@ -375,7 +375,7 @@ function killCloudflaredByPort(port) {
   } catch (e) { /* ignore */ }
 }
 
-export function killCloudflared(localPort) {
+export function killCloudflared(localPort = 20129) {
   if (cloudflaredProcess) {
     try {
       cloudflaredProcess.kill();
