@@ -53,7 +53,7 @@ export async function POST(request) {
       model: body?.model,
       provider: "chat-completions",
       inputTokens: tokenQuotaCheck.estimatedInputTokens || 0,
-      outputTokens: 0,
+      outputTokens: tokenQuotaCheck.estimatedOutputTokens || 0,
     });
   }
 

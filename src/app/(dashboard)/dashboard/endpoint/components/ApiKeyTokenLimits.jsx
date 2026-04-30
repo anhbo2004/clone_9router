@@ -46,6 +46,13 @@ export default function ApiKeyTokenLimits() {
     load();
   }, []);
 
+  useEffect(() => {
+    const t = setInterval(() => {
+      load();
+    }, 10000);
+    return () => clearInterval(t);
+  }, []);
+
   async function createKey() {
     setLoading(true);
     try {
@@ -199,10 +206,14 @@ export default function ApiKeyTokenLimits() {
           </thead>
           <tbody>
             {keys.map((key) => {
+              const usedInput = Number(key.usage?.inputTokens || 0);
+              const usedOutput = Number(key.usage?.outputTokens || 0);
               const used = Number(key.usage?.totalTokens || 0);
               const limit = Number(key.quota?.maxTotalTokens || 0);
+              const remaining = limit > 0 ? Math.max(0, limit - used) : null;
               const edit = getRowEdit(key);
               const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+              const over = limit > 0 && used > limit;
               return (
                 <tr key={key.id} className="border-t border-neutral-800">
                   <td className="p-3 font-medium">{key.name}</td>
@@ -217,7 +228,12 @@ export default function ApiKeyTokenLimits() {
                   <td className="p-3">{key.quota?.window}</td>
                   <td className="p-3">
                     <div>{fmt(used)} / {limit ? fmt(limit) : "∞"}</div>
-                    <div className="mt-1 h-2 rounded bg-neutral-800"><div className="h-2 rounded bg-orange-600" style={{ width: `${pct}%` }} /></div>
+                    <div className="mt-1 h-2 rounded bg-neutral-800">
+                      <div className={`h-2 rounded ${over ? "bg-red-600" : "bg-orange-600"}`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <div className="mt-1 text-xs text-neutral-400">
+                      Input: {fmt(usedInput)} | Output: {fmt(usedOutput)} | Remaining: {remaining === null ? "∞" : fmt(remaining)}
+                    </div>
                     <div className="mt-2 grid grid-cols-2 gap-2">
                       <input
                         className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"

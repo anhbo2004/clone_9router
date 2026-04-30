@@ -3,9 +3,10 @@ import fs from "fs/promises";
 import path from "path";
 import { createApiKey, deleteApiKey, getApiKeys, updateApiKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
+import { DATA_DIR } from "@/lib/dataDir";
 
-const DATA_DIR = process.env.TOKEN_QUOTA_DATA_DIR || process.cwd();
-const DB_FILE = path.join(DATA_DIR, ".9router-token-quota.json");
+const TOKEN_QUOTA_DATA_DIR = process.env.TOKEN_QUOTA_DATA_DIR || DATA_DIR;
+const DB_FILE = path.join(TOKEN_QUOTA_DATA_DIR, ".9router-token-quota.json");
 
 const DEFAULT_DB = {
   usage: [],
@@ -69,6 +70,16 @@ export function quotaWindowStart(window) {
 export function estimateTokens(payload) {
   const text = typeof payload === "string" ? payload : JSON.stringify(payload || "");
   return Math.max(1, Math.ceil(text.length / 4));
+}
+
+export function estimateOutputTokens(body = {}) {
+  const fromMaxCompletion = Number(body?.max_completion_tokens || 0);
+  if (fromMaxCompletion > 0) return fromMaxCompletion;
+
+  const fromMaxTokens = Number(body?.max_tokens || 0);
+  if (fromMaxTokens > 0) return fromMaxTokens;
+
+  return 0;
 }
 
 export async function listTokenApiKeys() {
@@ -215,15 +226,18 @@ export async function checkTokenQuota({ apiKey, body }) {
   }
 
   const estimatedInputTokens = estimateTokens(body?.messages || body?.input || body);
+  const estimatedOutputTokens = estimateOutputTokens(body);
   const usage = await getTokenApiKeyUsage(apiKey.id, apiKey.quota.window);
 
   const projectedInput = usage.inputTokens + estimatedInputTokens;
-  const projectedTotal = usage.totalTokens + estimatedInputTokens;
+  const projectedOutput = usage.outputTokens + estimatedOutputTokens;
+  const projectedTotal = usage.totalTokens + estimatedInputTokens + estimatedOutputTokens;
 
   const inputExceeded = apiKey.quota.maxInputTokens > 0 && projectedInput > apiKey.quota.maxInputTokens;
+  const outputExceeded = apiKey.quota.maxOutputTokens > 0 && projectedOutput > apiKey.quota.maxOutputTokens;
   const totalExceeded = apiKey.quota.maxTotalTokens > 0 && projectedTotal > apiKey.quota.maxTotalTokens;
 
-  if (inputExceeded || totalExceeded) {
+  if (inputExceeded || outputExceeded || totalExceeded) {
     return {
       allowed: false,
       status: 429,
@@ -233,7 +247,7 @@ export async function checkTokenQuota({ apiKey, body }) {
     };
   }
 
-  return { allowed: true, usage, estimatedInputTokens };
+  return { allowed: true, usage, estimatedInputTokens, estimatedOutputTokens };
 }
 
 export async function recordTokenUsage({ apiKeyId, model, provider, inputTokens = 0, outputTokens = 0, totalTokens }) {
