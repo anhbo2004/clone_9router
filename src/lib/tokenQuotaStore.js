@@ -283,12 +283,22 @@ export async function checkTokenQuota({ apiKey, body }) {
   const totalExceeded = apiKey.quota.maxTotalTokens > 0 && projectedTotal > apiKey.quota.maxTotalTokens;
 
   if (inputExceeded || outputExceeded || totalExceeded) {
+    let keyAutoDisabled = false;
+    try {
+      await updateApiKey(apiKey.id, { isActive: false });
+      keyAutoDisabled = true;
+    } catch {
+      keyAutoDisabled = false;
+    }
     return {
       allowed: false,
       status: 429,
-      error: "API key token quota exceeded",
+      error: keyAutoDisabled
+        ? "API key token quota exceeded. Key was auto-disabled."
+        : "API key token quota exceeded",
       usage,
       limit: apiKey.quota,
+      keyAutoDisabled,
     };
   }
 
@@ -326,6 +336,7 @@ export async function getTokenApiKeyStatusBySecret(secret) {
     limit.maxTotalTokens > 0 ? Math.max(0, Number(limit.maxTotalTokens) - Number(usage.totalTokens || 0)) : null;
   const exceeded =
     (limit.maxInputTokens > 0 && Number(usage.inputTokens || 0) >= Number(limit.maxInputTokens)) ||
+    (limit.maxOutputTokens > 0 && Number(usage.outputTokens || 0) >= Number(limit.maxOutputTokens)) ||
     (limit.maxTotalTokens > 0 && Number(usage.totalTokens || 0) >= Number(limit.maxTotalTokens));
 
   return {

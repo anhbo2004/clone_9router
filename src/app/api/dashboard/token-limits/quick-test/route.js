@@ -32,6 +32,7 @@ export async function POST(req) {
           error: check.error,
           usage: check.usage,
           limit: check.limit,
+          keyAutoDisabled: !!check.keyAutoDisabled,
         },
         { status: check.status || 429 }
       );

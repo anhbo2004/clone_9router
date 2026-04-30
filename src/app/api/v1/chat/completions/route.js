@@ -43,6 +43,7 @@ export async function POST(request) {
             type: "rate_limit_exceeded",
             usage: tokenQuotaCheck.usage,
             limit: tokenQuotaCheck.limit,
+            keyAutoDisabled: !!tokenQuotaCheck.keyAutoDisabled,
           },
         },
         { status: tokenQuotaCheck.status || 429 }
