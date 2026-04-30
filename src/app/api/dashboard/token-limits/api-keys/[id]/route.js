@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
 import { deleteTokenApiKey, getTokenApiKeyUsage, setTokenApiKeyUsage, updateTokenApiKey } from "@/lib/tokenQuotaStore";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req, { params }) {
   const { id } = await params;
   const url = new URL(req.url);
   const window = url.searchParams.get("window") || "monthly";
   const usage = await getTokenApiKeyUsage(id, window);
-  return NextResponse.json({ usage });
+  return NextResponse.json(
+    { usage, updatedAt: new Date().toISOString() },
+    { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } }
+  );
 }
 
 export async function PATCH(req, { params }) {

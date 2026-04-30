@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createTokenApiKey, getTokenApiKeyUsage, listTokenApiKeys } from "@/lib/tokenQuotaStore";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const keys = await listTokenApiKeys();
   const enriched = await Promise.all(
@@ -9,7 +11,10 @@ export async function GET() {
       usage: await getTokenApiKeyUsage(key.id, key.quota?.window || "monthly"),
     }))
   );
-  return NextResponse.json({ keys: enriched });
+  return NextResponse.json(
+    { keys: enriched, updatedAt: new Date().toISOString() },
+    { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } }
+  );
 }
 
 export async function POST(req) {

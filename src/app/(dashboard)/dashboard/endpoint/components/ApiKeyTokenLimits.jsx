@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 function fmt(n) {
   return Number(n || 0).toLocaleString();
@@ -14,7 +14,12 @@ export default function ApiKeyTokenLimits() {
   const [testingId, setTestingId] = useState("");
   const [testMessage, setTestMessage] = useState("");
   const [rowEdits, setRowEdits] = useState({});
+  const [dirtyRows, setDirtyRows] = useState({});
   const [savingId, setSavingId] = useState("");
+  const [lastUpdatedAt, setLastUpdatedAt] = useState("");
+  const [liveConnected, setLiveConnected] = useState(false);
+  const refreshTimerRef = useRef(null);
+  const loadingRef = useRef(false);
   const [form, setForm] = useState({
     name: "",
     window: "daily",
@@ -25,21 +30,31 @@ export default function ApiKeyTokenLimits() {
   });
 
   async function load() {
-    const res = await fetch("/api/dashboard/token-limits/api-keys", { cache: "no-store" });
-    const data = await res.json();
-    const nextKeys = data.keys || [];
-    setKeys(nextKeys);
-    setRowEdits(
-      Object.fromEntries(
-        nextKeys.map((key) => [
-          key.id,
-          {
-            used: Number(key.usage?.totalTokens || 0),
-            limit: Number(key.quota?.maxTotalTokens || 0),
-          },
-        ])
-      )
-    );
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    try {
+      const res = await fetch("/api/dashboard/token-limits/api-keys", {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
+      const data = await res.json();
+      const nextKeys = data.keys || [];
+      setKeys(nextKeys);
+      setLastUpdatedAt(data.updatedAt || new Date().toISOString());
+      setRowEdits((prev) =>
+        Object.fromEntries(
+          nextKeys.map((key) => {
+            const current = {
+              used: Number(key.usage?.totalTokens || 0),
+              limit: Number(key.quota?.maxTotalTokens || 0),
+            };
+            return [key.id, dirtyRows[key.id] ? prev[key.id] || current : current];
+          })
+        )
+      );
+    } finally {
+      loadingRef.current = false;
+    }
   }
 
   useEffect(() => {
@@ -51,7 +66,25 @@ export default function ApiKeyTokenLimits() {
       load();
     }, 2000);
     return () => clearInterval(t);
-  }, []);
+  }, [dirtyRows]);
+
+  useEffect(() => {
+    const events = new EventSource("/api/usage/stream");
+    events.onopen = () => setLiveConnected(true);
+    events.onerror = () => setLiveConnected(false);
+    events.onmessage = () => {
+      clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = setTimeout(() => {
+        load();
+      }, 250);
+    };
+
+    return () => {
+      clearTimeout(refreshTimerRef.current);
+      events.close();
+      setLiveConnected(false);
+    };
+  }, [dirtyRows]);
 
   async function createKey() {
     setLoading(true);
@@ -101,6 +134,7 @@ export default function ApiKeyTokenLimits() {
   }
 
   function onChangeRow(id, field, value) {
+    setDirtyRows((prev) => ({ ...prev, [id]: true }));
     setRowEdits((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), [field]: value } }));
   }
 
@@ -111,6 +145,11 @@ export default function ApiKeyTokenLimits() {
       await patchKey(key.id, {
         quota: { ...key.quota, maxTotalTokens: Number(edit.limit || 0) },
         usage: { totalTokens: Number(edit.used || 0) },
+      });
+      setDirtyRows((prev) => {
+        const next = { ...prev };
+        delete next[key.id];
+        return next;
       });
     } finally {
       setSavingId("");
@@ -166,6 +205,10 @@ export default function ApiKeyTokenLimits() {
       <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div>
           <h2 className="text-xl font-semibold">API Key Token Limits</h2>
+          <p className="text-xs text-neutral-500">
+            {liveConnected ? "Live updates connected" : "Live updates reconnecting"}
+            {lastUpdatedAt ? ` | Last update: ${new Date(lastUpdatedAt).toLocaleTimeString()}` : ""}
+          </p>
           <p className="text-sm text-neutral-400">Giới hạn token theo từng API key. Tổng đã dùng: {fmt(totalUsed)} tokens.</p>
         </div>
         <button onClick={load} className="rounded-lg border border-neutral-700 px-3 py-2 text-sm hover:bg-neutral-800">Refresh</button>
