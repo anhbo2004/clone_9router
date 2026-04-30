@@ -3,6 +3,8 @@ import { createErrorResult, parseUpstreamError, formatProviderError } from "../u
 import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { getExecutor } from "../executors/index.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
+import { saveRequestUsage } from "@/lib/usageDb.js";
+import { buildQuotaLockedResponse } from "./chatCore/requestDetail.js";
 
 // Google AI (Gemini) provider aliases / identifiers
 const GEMINI_PROVIDERS = new Set(["gemini", "google_ai_studio"]);
@@ -181,6 +183,11 @@ function normalizeEmbeddingsResponse(responseBody, model, provider) {
   return responseBody;
 }
 
+function estimateEmbeddingInputTokens(input) {
+  const text = Array.isArray(input) ? input.map((item) => String(item)).join("\n") : String(input || "");
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
 /**
  * Core embeddings handler — shared between Worker and SSE server.
  *
@@ -198,6 +205,9 @@ export async function handleEmbeddingsCore({
   modelInfo,
   credentials,
   log,
+  connectionId,
+  apiKey,
+  endpoint,
   onCredentialsRefreshed,
   onRequestSuccess
 }) {
@@ -303,6 +313,34 @@ export async function handleEmbeddingsCore({
   const normalized = normalizeEmbeddingsResponse(responseBody, model, provider);
 
   log?.debug?.("EMBEDDINGS", `Success | usage=${JSON.stringify(normalized.usage || {})}`);
+
+  let quotaStatus = null;
+  const usage = normalized.usage || {};
+  const promptTokens = Number(usage.prompt_tokens || usage.input_tokens || 0) || estimateEmbeddingInputTokens(input);
+  const completionTokens = Number(usage.completion_tokens || usage.output_tokens || 0);
+  if (promptTokens > 0 || completionTokens > 0) {
+    const saved = await saveRequestUsage({
+      provider: provider || "unknown",
+      model: model || "unknown",
+      tokens: {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: Number(usage.total_tokens || usage.totalTokens || promptTokens + completionTokens),
+      },
+      timestamp: new Date().toISOString(),
+      connectionId: connectionId || undefined,
+      apiKey: apiKey || undefined,
+      endpoint: endpoint || "/v1/embeddings",
+    }).catch(() => null);
+    quotaStatus = saved?.quotaStatus || null;
+  }
+
+  if (quotaStatus?.locked) {
+    return {
+      success: true,
+      response: buildQuotaLockedResponse(quotaStatus, { provider, model }),
+    };
+  }
 
   return {
     success: true,

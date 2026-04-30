@@ -64,6 +64,78 @@ function ensureQuotaShape(key) {
   };
 }
 
+function normalizeUsageTotals(usage = {}) {
+  const inputTokens = Number(usage.inputTokens ?? usage.prompt_tokens ?? usage.input_tokens ?? 0);
+  const outputTokens = Number(usage.outputTokens ?? usage.completion_tokens ?? usage.output_tokens ?? 0);
+  const totalTokens = Number(
+    usage.totalTokens ??
+      usage.total_tokens ??
+      (Number.isFinite(inputTokens) ? inputTokens : 0) + (Number.isFinite(outputTokens) ? outputTokens : 0)
+  );
+
+  return {
+    inputTokens: Number.isFinite(inputTokens) ? inputTokens : 0,
+    outputTokens: Number.isFinite(outputTokens) ? outputTokens : 0,
+    totalTokens: Number.isFinite(totalTokens) ? totalTokens : 0,
+  };
+}
+
+function getQuotaBreach(usage = {}, quota = {}, { inclusive = true } = {}) {
+  const current = normalizeUsageTotals(usage);
+  const checks = [
+    { type: "input", used: current.inputTokens, limit: Number(quota.maxInputTokens || 0), label: "input tokens" },
+    { type: "output", used: current.outputTokens, limit: Number(quota.maxOutputTokens || 0), label: "output tokens" },
+    { type: "total", used: current.totalTokens, limit: Number(quota.maxTotalTokens || 0), label: "total tokens" },
+  ];
+
+  return checks.find((item) => item.limit > 0 && (inclusive ? item.used >= item.limit : item.used > item.limit)) || null;
+}
+
+function buildQuotaMessage({ key, usage, limit, breach, locked = false, projected = null }) {
+  const keyName = key?.name || "API key";
+  const used = Number(breach?.used ?? 0).toLocaleString();
+  const max = Number(breach?.limit ?? 0).toLocaleString();
+  const metric = breach?.label || "tokens";
+  const window = limit?.window || "monthly";
+  const prefix = locked ? "API key has reached its token limit and was locked." : "API key token quota would be exceeded.";
+  const projectedText = projected ? ` Projected ${metric}: ${Number(projected).toLocaleString()}.` : "";
+
+  return `${prefix} Key "${keyName}" used ${used}/${max} ${metric} in the ${window} window.${projectedText} Please use another key or raise the limit in API Key Token Limits.`;
+}
+
+async function lockTokenApiKeyForQuota(apiKey, usage, breach, source = {}) {
+  const limit = apiKey.quota || ensureQuotaShape(apiKey);
+  const message = buildQuotaMessage({ key: apiKey, usage, limit, breach, locked: true });
+  const now = new Date().toISOString();
+
+  await updateApiKey(apiKey.id, {
+    isActive: false,
+    disabledReason: "token_quota_exceeded",
+    disabledMessage: message,
+    disabledAt: now,
+    quotaExceededAt: now,
+    quotaExceededMetric: breach?.type || "total",
+    quotaExceededUsage: usage,
+    quotaExceededLimit: limit,
+    quotaExceededSource: {
+      provider: source.provider || null,
+      model: source.model || null,
+      endpoint: source.endpoint || null,
+    },
+  });
+
+  return {
+    locked: true,
+    keyAutoDisabled: true,
+    keyId: apiKey.id,
+    keyName: apiKey.name,
+    message,
+    usage,
+    limit,
+    breach,
+  };
+}
+
 export function quotaWindowStart(window) {
   const now = new Date();
   const start = new Date(now);
@@ -127,8 +199,22 @@ export async function createTokenApiKey(input = {}) {
 export async function updateTokenApiKey(id, patch = {}) {
   const updateData = {};
   if (typeof patch.name === "string") updateData.name = patch.name;
-  if (typeof patch.enabled === "boolean") updateData.isActive = patch.enabled;
-  if (typeof patch.isActive === "boolean") updateData.isActive = patch.isActive;
+  if (typeof patch.enabled === "boolean") {
+    updateData.isActive = patch.enabled;
+    if (patch.enabled) {
+      updateData.disabledReason = null;
+      updateData.disabledMessage = null;
+      updateData.disabledAt = null;
+    }
+  }
+  if (typeof patch.isActive === "boolean") {
+    updateData.isActive = patch.isActive;
+    if (patch.isActive) {
+      updateData.disabledReason = null;
+      updateData.disabledMessage = null;
+      updateData.disabledAt = null;
+    }
+  }
   if (Array.isArray(patch.allowedModels)) updateData.allowedModels = patch.allowedModels;
   if (patch.quota) updateData.quota = { ...ensureQuotaShape({}), ...patch.quota };
 
@@ -152,7 +238,7 @@ export async function findTokenApiKeyFromAuth(authHeader) {
   if (!secret) return null;
 
   const keys = await getApiKeys();
-  const key = keys.find((item) => item.key === secret && item.isActive !== false);
+  const key = keys.find((item) => item.key === secret);
   if (!key) return null;
 
   return {
@@ -203,15 +289,16 @@ export async function getTokenApiKeyUsage(apiKeyId, window = "monthly") {
       const history = await getUsageHistory({ startDate: since });
       const rows = history
         .filter((row) => row.apiKey === apiKeyValue)
-        .map((row) => ({
-          prompt_tokens: Number(row.tokens?.prompt_tokens || row.tokens?.input_tokens || 0),
-          completion_tokens: Number(row.tokens?.completion_tokens || row.tokens?.output_tokens || 0),
-          total_tokens: Number(
-            row.tokens?.total_tokens ??
-              Number(row.tokens?.prompt_tokens || row.tokens?.input_tokens || 0) +
-                Number(row.tokens?.completion_tokens || row.tokens?.output_tokens || 0)
-          ),
-        }));
+        .map((row) => {
+          const promptTokens = Number(row.tokens?.prompt_tokens || row.tokens?.input_tokens || 0);
+          const completionTokens = Number(row.tokens?.completion_tokens || row.tokens?.output_tokens || 0);
+          const reasoningTokens = Number(row.tokens?.reasoning_tokens || 0);
+          return {
+            prompt_tokens: promptTokens,
+            completion_tokens: completionTokens,
+            total_tokens: Number(row.tokens?.total_tokens ?? promptTokens + completionTokens + reasoningTokens),
+          };
+        });
       exactUsage = aggregateUsageRows(rows);
     }
   } catch {
@@ -263,6 +350,18 @@ export async function setTokenApiKeyUsage({ apiKeyId, window = "monthly", totalT
 
 export async function checkTokenQuota({ apiKey, body }) {
   if (!apiKey) return { allowed: false, status: 401, error: "Missing or invalid API key" };
+  if (apiKey.enabled === false || apiKey.isActive === false) {
+    return {
+      allowed: false,
+      status: 403,
+      error:
+        apiKey.disabledMessage ||
+        `API key "${apiKey.name || apiKey.id}" is disabled. Please enable it in API Key Token Limits or use another key.`,
+      limit: apiKey.quota,
+      keyDisabled: true,
+      keyAutoDisabled: apiKey.disabledReason === "token_quota_exceeded",
+    };
+  }
   if (!apiKey.quota?.enabled) return { allowed: true };
 
   const model = body?.model || "";
@@ -274,35 +373,97 @@ export async function checkTokenQuota({ apiKey, body }) {
   const estimatedOutputTokens = estimateOutputTokens(body);
   const usage = await getTokenApiKeyUsage(apiKey.id, apiKey.quota.window);
 
+  const currentBreach = getQuotaBreach(usage, apiKey.quota, { inclusive: true });
+  if (currentBreach) {
+    const lock = await lockTokenApiKeyForQuota(apiKey, usage, currentBreach, { provider: "preflight", model });
+    return {
+      allowed: false,
+      status: 429,
+      error: lock.message,
+      usage,
+      limit: apiKey.quota,
+      breach: currentBreach,
+      keyAutoDisabled: true,
+    };
+  }
+
   const projectedInput = usage.inputTokens + estimatedInputTokens;
   const projectedOutput = usage.outputTokens + estimatedOutputTokens;
   const projectedTotal = usage.totalTokens + estimatedInputTokens + estimatedOutputTokens;
 
-  const inputExceeded = apiKey.quota.maxInputTokens > 0 && projectedInput > apiKey.quota.maxInputTokens;
-  const outputExceeded = apiKey.quota.maxOutputTokens > 0 && projectedOutput > apiKey.quota.maxOutputTokens;
-  const totalExceeded = apiKey.quota.maxTotalTokens > 0 && projectedTotal > apiKey.quota.maxTotalTokens;
+  const projectedUsage = {
+    inputTokens: projectedInput,
+    outputTokens: projectedOutput,
+    totalTokens: projectedTotal,
+  };
+  const projectedBreach = getQuotaBreach(projectedUsage, apiKey.quota, { inclusive: false });
 
-  if (inputExceeded || outputExceeded || totalExceeded) {
-    let keyAutoDisabled = false;
-    try {
-      await updateApiKey(apiKey.id, { isActive: false });
-      keyAutoDisabled = true;
-    } catch {
-      keyAutoDisabled = false;
-    }
+  if (projectedBreach) {
     return {
       allowed: false,
       status: 429,
-      error: keyAutoDisabled
-        ? "API key token quota exceeded. Key was auto-disabled."
-        : "API key token quota exceeded",
+      error: buildQuotaMessage({
+        key: apiKey,
+        usage,
+        limit: apiKey.quota,
+        breach: { ...projectedBreach, used: usage[`${projectedBreach.type}Tokens`] ?? projectedBreach.used },
+        projected: projectedBreach.used,
+      }),
       usage,
       limit: apiKey.quota,
-      keyAutoDisabled,
+      breach: projectedBreach,
+      keyAutoDisabled: false,
     };
   }
 
   return { allowed: true, usage, estimatedInputTokens, estimatedOutputTokens };
+}
+
+export async function enforceTokenQuotaAfterUsage({ apiKeyValue, apiKeyId, usageEntry = {}, provider, model, endpoint } = {}) {
+  let apiKey = null;
+  if (apiKeyId) {
+    const keys = await getApiKeys();
+    apiKey = keys.find((item) => item.id === apiKeyId) || null;
+  } else if (apiKeyValue) {
+    apiKey = await findTokenApiKeyBySecret(apiKeyValue);
+  }
+
+  if (!apiKey) return { locked: false };
+  apiKey = {
+    ...apiKey,
+    enabled: apiKey.isActive !== false,
+    quota: ensureQuotaShape(apiKey),
+  };
+
+  if (!apiKey.quota.enabled) return { locked: false };
+
+  const limit = apiKey.quota || ensureQuotaShape(apiKey);
+  const usage = await getTokenApiKeyUsage(apiKey.id, limit.window);
+  const breach = getQuotaBreach(usage, limit, { inclusive: true });
+  if (!breach) return { locked: false, usage, limit };
+
+  if (apiKey.enabled === false || apiKey.isActive === false) {
+    return {
+      locked: true,
+      keyAutoDisabled: apiKey.disabledReason === "token_quota_exceeded",
+      keyId: apiKey.id,
+      keyName: apiKey.name,
+      message:
+        apiKey.disabledMessage ||
+        buildQuotaMessage({ key: apiKey, usage, limit, breach, locked: true }),
+      usage,
+      limit,
+      breach,
+    };
+  }
+
+  const result = await lockTokenApiKeyForQuota(apiKey, usage, breach, {
+    provider: provider || usageEntry.provider,
+    model: model || usageEntry.model,
+    endpoint: endpoint || usageEntry.endpoint,
+  });
+  console.warn(`[TokenQuota] ${result.message}`);
+  return result;
 }
 
 export async function recordTokenUsage({ apiKeyId, model, provider, inputTokens = 0, outputTokens = 0, totalTokens }) {
@@ -320,7 +481,8 @@ export async function recordTokenUsage({ apiKeyId, model, provider, inputTokens 
   };
   db.usage.push(row);
   await writeQuotaDb(db);
-  return row;
+  const quotaStatus = await enforceTokenQuotaAfterUsage({ apiKeyId, usageEntry: row, provider, model });
+  return { ...row, quotaStatus };
 }
 
 export async function getTokenApiKeyStatusBySecret(secret) {
@@ -338,6 +500,15 @@ export async function getTokenApiKeyStatusBySecret(secret) {
     (limit.maxInputTokens > 0 && Number(usage.inputTokens || 0) >= Number(limit.maxInputTokens)) ||
     (limit.maxOutputTokens > 0 && Number(usage.outputTokens || 0) >= Number(limit.maxOutputTokens)) ||
     (limit.maxTotalTokens > 0 && Number(usage.totalTokens || 0) >= Number(limit.maxTotalTokens));
+  const breach = getQuotaBreach(usage, limit, { inclusive: true });
+  let effectiveEnabled = apiKey.enabled;
+  let disabledMessage = apiKey.disabledMessage;
+
+  if (breach && apiKey.enabled !== false) {
+    const lock = await lockTokenApiKeyForQuota(apiKey, usage, breach, { provider: "status-check" });
+    effectiveEnabled = false;
+    disabledMessage = lock.message;
+  }
 
   return {
     found: true,
@@ -345,15 +516,17 @@ export async function getTokenApiKeyStatusBySecret(secret) {
       id: apiKey.id,
       name: apiKey.name,
       key: apiKey.key,
-      enabled: apiKey.enabled,
+      enabled: effectiveEnabled,
       createdAt: apiKey.createdAt,
       allowedModels: apiKey.allowedModels || [],
       quota: limit,
+      disabledMessage,
     },
     usage,
     status: {
-      active: apiKey.enabled,
+      active: effectiveEnabled,
       exceeded,
+      breach,
       window,
       windowStart: quotaWindowStart(window),
       remainingInputTokens: remainingInput,

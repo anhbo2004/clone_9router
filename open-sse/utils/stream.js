@@ -9,6 +9,21 @@ export { COLORS, formatSSE };
 // sharedEncoder is stateless — safe to share across streams
 const sharedEncoder = new TextEncoder();
 
+function buildQuotaLimitEvent(quotaStatus) {
+  if (!quotaStatus?.locked) return null;
+  return `event: quota_limit\ndata: ${JSON.stringify({
+    error: {
+      message: quotaStatus.message,
+      type: "rate_limit_exceeded",
+      code: "api_key_token_quota_exceeded",
+      keyAutoDisabled: !!quotaStatus.keyAutoDisabled,
+      usage: quotaStatus.usage,
+      limit: quotaStatus.limit,
+      breach: quotaStatus.breach,
+    }
+  })}\n\n`;
+}
+
 /**
  * Stream modes
  */
@@ -253,7 +268,7 @@ export function createSSEStream(options = {}) {
       }
     },
 
-    flush(controller) {
+    async flush(controller) {
       trackPendingRequest(model, provider, connectionId, false);
       try {
         const remaining = decoder.decode();
@@ -274,9 +289,22 @@ export function createSSEStream(options = {}) {
           }
 
           if (hasValidUsage(usage)) {
-            logUsage(provider, usage, model, connectionId, apiKey);
+            logUsage(provider, usage, model, connectionId, apiKey, { persist: !onStreamComplete });
           } else {
             appendRequestLog({ model, provider, connectionId, tokens: null, status: "200 OK" }).catch(() => { });
+          }
+
+          let quotaStatus = null;
+          if (onStreamComplete) {
+            quotaStatus = await onStreamComplete({
+              content: accumulatedContent,
+              thinking: accumulatedThinking
+            }, usage, ttftAt);
+          }
+          const quotaEvent = buildQuotaLimitEvent(quotaStatus);
+          if (quotaEvent) {
+            reqLogger?.appendConvertedChunk?.(quotaEvent);
+            controller.enqueue(sharedEncoder.encode(quotaEvent));
           }
           
           // IMPORTANT: In passthrough mode we still must terminate the SSE stream.
@@ -286,13 +314,6 @@ export function createSSEStream(options = {}) {
           const doneOutput = "data: [DONE]\n\n";
           reqLogger?.appendConvertedChunk?.(doneOutput);
           controller.enqueue(sharedEncoder.encode(doneOutput));
-
-          if (onStreamComplete) {
-            onStreamComplete({
-              content: accumulatedContent,
-              thinking: accumulatedThinking
-            }, usage, ttftAt);
-          }
           return;
         }
 
@@ -335,26 +356,33 @@ export function createSSEStream(options = {}) {
           }
         }
 
-        const doneOutput = "data: [DONE]\n\n";
-        reqLogger?.appendConvertedChunk?.(doneOutput);
-        controller.enqueue(sharedEncoder.encode(doneOutput));
-
         if (!hasValidUsage(state?.usage) && totalContentLength > 0) {
           state.usage = estimateUsage(body, totalContentLength, sourceFormat);
         }
 
         if (hasValidUsage(state?.usage)) {
-          logUsage(state.provider || targetFormat, state.usage, model, connectionId, apiKey);
+          logUsage(state.provider || targetFormat, state.usage, model, connectionId, apiKey, { persist: !onStreamComplete });
         } else {
           appendRequestLog({ model, provider, connectionId, tokens: null, status: "200 OK" }).catch(() => { });
         }
         
+        let quotaStatus = null;
         if (onStreamComplete) {
-          onStreamComplete({
+          quotaStatus = await onStreamComplete({
             content: accumulatedContent,
             thinking: accumulatedThinking
           }, state?.usage, ttftAt);
         }
+
+        const quotaEvent = buildQuotaLimitEvent(quotaStatus);
+        if (quotaEvent) {
+          reqLogger?.appendConvertedChunk?.(quotaEvent);
+          controller.enqueue(sharedEncoder.encode(quotaEvent));
+        }
+
+        const doneOutput = "data: [DONE]\n\n";
+        reqLogger?.appendConvertedChunk?.(doneOutput);
+        controller.enqueue(sharedEncoder.encode(doneOutput));
       } catch (error) {
         console.log("Error in flush:", error);
       }

@@ -49,7 +49,7 @@ export default function ApiKeyTokenLimits() {
   useEffect(() => {
     const t = setInterval(() => {
       load();
-    }, 10000);
+    }, 2000);
     return () => clearInterval(t);
   }, []);
 
@@ -214,7 +214,8 @@ export default function ApiKeyTokenLimits() {
               const remaining = limit > 0 ? Math.max(0, limit - used) : null;
               const edit = getRowEdit(key);
               const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
-              const over = limit > 0 && used > limit;
+              const over = limit > 0 && used >= limit;
+              const quotaLocked = key.disabledReason === "token_quota_exceeded";
               return (
                 <tr key={key.id} className="border-t border-neutral-800">
                   <td className="p-3 font-medium">{key.name}</td>
@@ -255,7 +256,18 @@ export default function ApiKeyTokenLimits() {
                     </div>
                   </td>
                   <td className="p-3 text-neutral-300">{key.allowedModels?.length ? key.allowedModels.join(", ") : "All"}</td>
-                  <td className="p-3">{key.enabled ? <span className="text-green-400">Enabled</span> : <span className="text-red-400">Disabled</span>}</td>
+                  <td className="p-3">
+                    {key.enabled ? (
+                      <span className="text-green-400">Enabled</span>
+                    ) : (
+                      <div className="max-w-[220px]">
+                        <span className="text-red-400">{quotaLocked ? "Locked by token limit" : "Disabled"}</span>
+                        {key.disabledMessage ? (
+                          <div className="mt-1 text-xs text-red-300">{key.disabledMessage}</div>
+                        ) : null}
+                      </div>
+                    )}
+                  </td>
                   <td className="space-x-2 p-3 text-right">
                     <button className="rounded bg-blue-700 px-3 py-1 hover:bg-blue-600 disabled:opacity-60" disabled={testingId === key.id} onClick={() => quickTest(key)}>
                       {testingId === key.id ? "Testing..." : "Quick test"}

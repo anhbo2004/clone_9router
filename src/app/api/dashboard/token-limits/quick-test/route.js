@@ -38,13 +38,28 @@ export async function POST(req) {
       );
     }
 
-    await recordTokenUsage({
+    const usageRecord = await recordTokenUsage({
       apiKeyId: apiKey.id,
       model,
       provider: "quick-test",
       inputTokens: check.estimatedInputTokens || 0,
       outputTokens: 0,
     });
+
+    if (usageRecord?.quotaStatus?.locked) {
+      return NextResponse.json(
+        {
+          ok: false,
+          status: 429,
+          error: usageRecord.quotaStatus.message,
+          usage: usageRecord.quotaStatus.usage,
+          limit: usageRecord.quotaStatus.limit,
+          breach: usageRecord.quotaStatus.breach,
+          keyAutoDisabled: true,
+        },
+        { status: 429 }
+      );
+    }
 
     return NextResponse.json({
       ok: true,

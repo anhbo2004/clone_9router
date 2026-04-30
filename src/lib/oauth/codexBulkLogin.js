@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { authenticator } from "otplib";
+import { generateSync } from "otplib";
 import { createProviderConnection } from "@/lib/localDb";
 import { CODEX_CONFIG } from "@/lib/oauth/constants/oauth";
 import { extractCodexAccountInfo } from "@/lib/oauth/providers";
@@ -169,7 +169,7 @@ export async function runCodexBulkLogin({ accountsText, headless = false }) {
         await clickAny(page, ["continue", "next", "log in", "sign in", "submit"]);
 
         await page.waitForTimeout(1200);
-        const otp = authenticator.generate(normalizeSecret(account.totpSecret));
+        const otp = generateSync({ secret: normalizeSecret(account.totpSecret) });
         const otpOk = await fillFirst(
           page,
           [

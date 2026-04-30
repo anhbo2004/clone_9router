@@ -112,6 +112,9 @@ export async function handleEmbeddings(request) {
       modelInfo: { provider, model },
       credentials: refreshedCredentials,
       log,
+      connectionId: credentials.connectionId,
+      apiKey,
+      endpoint: url.pathname,
       onCredentialsRefreshed: async (newCreds) => {
         await updateProviderCredentials(credentials.connectionId, {
           accessToken: newCreds.accessToken,

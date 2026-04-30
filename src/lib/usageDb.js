@@ -312,8 +312,26 @@ export async function saveRequestUsage(entry) {
 
     await db.write();
     statsEmitter.emit("update");
+    let quotaStatus = null;
+    if (entry.apiKey) {
+      try {
+        const { enforceTokenQuotaAfterUsage } = await import("@/lib/tokenQuotaStore.js");
+        quotaStatus = await enforceTokenQuotaAfterUsage({
+          apiKeyValue: entry.apiKey,
+          usageEntry: entry,
+          provider: entry.provider,
+          model: entry.model,
+          endpoint: entry.endpoint,
+        });
+        if (quotaStatus?.locked) statsEmitter.emit("update");
+      } catch (error) {
+        console.error("[usageDb] Failed to enforce token quota:", error.message);
+      }
+    }
+    return { entry, quotaStatus };
   } catch (error) {
     console.error("Failed to save usage stats:", error);
+    return null;
   }
 }
 

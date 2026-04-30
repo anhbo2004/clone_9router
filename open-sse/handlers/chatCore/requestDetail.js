@@ -28,6 +28,7 @@ export function extractUsageFromResponse(responseBody) {
     return {
       prompt_tokens: responseBody.usage.input_tokens || 0,
       completion_tokens: responseBody.usage.output_tokens || 0,
+      total_tokens: (responseBody.usage.input_tokens || 0) + (responseBody.usage.output_tokens || 0),
       cache_read_input_tokens: responseBody.usage.cache_read_input_tokens,
       cache_creation_input_tokens: responseBody.usage.cache_creation_input_tokens
     };
@@ -38,6 +39,9 @@ export function extractUsageFromResponse(responseBody) {
     return {
       prompt_tokens: responseBody.usage.prompt_tokens || 0,
       completion_tokens: responseBody.usage.completion_tokens || 0,
+      total_tokens:
+        responseBody.usage.total_tokens ??
+        (Number(responseBody.usage.prompt_tokens || 0) + Number(responseBody.usage.completion_tokens || 0)),
       cached_tokens: responseBody.usage.prompt_tokens_details?.cached_tokens,
       reasoning_tokens: responseBody.usage.completion_tokens_details?.reasoning_tokens
     };
@@ -48,6 +52,11 @@ export function extractUsageFromResponse(responseBody) {
     return {
       prompt_tokens: responseBody.usageMetadata.promptTokenCount || 0,
       completion_tokens: responseBody.usageMetadata.candidatesTokenCount || 0,
+      total_tokens:
+        responseBody.usageMetadata.totalTokenCount ??
+        (Number(responseBody.usageMetadata.promptTokenCount || 0) +
+          Number(responseBody.usageMetadata.candidatesTokenCount || 0) +
+          Number(responseBody.usageMetadata.thoughtsTokenCount || 0)),
       reasoning_tokens: responseBody.usageMetadata.thoughtsTokenCount
     };
   }
@@ -72,13 +81,13 @@ export function buildRequestDetail(base, overrides = {}) {
   };
 }
 
-export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, label = "USAGE" }) {
-  if (!tokens || typeof tokens !== "object") return;
+export async function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, label = "USAGE" }) {
+  if (!tokens || typeof tokens !== "object") return null;
 
   const inTokens = tokens.input_tokens ?? tokens.prompt_tokens ?? 0;
   const outTokens = tokens.output_tokens ?? tokens.completion_tokens ?? 0;
 
-  if (inTokens === 0 && outTokens === 0) return;
+  if (inTokens === 0 && outTokens === 0) return null;
 
   const time = new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const accountSuffix = connectionId ? ` | account=${connectionId.slice(0, 8)}...` : "";
@@ -87,10 +96,15 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
   // Normalize to OpenAI token shape for storage
   const normalized = {
     prompt_tokens: tokens.prompt_tokens ?? tokens.input_tokens ?? 0,
-    completion_tokens: tokens.completion_tokens ?? tokens.output_tokens ?? 0
+    completion_tokens: tokens.completion_tokens ?? tokens.output_tokens ?? 0,
+    total_tokens:
+      tokens.total_tokens ??
+      Number(tokens.prompt_tokens ?? tokens.input_tokens ?? 0) +
+        Number(tokens.completion_tokens ?? tokens.output_tokens ?? 0) +
+        Number(tokens.reasoning_tokens || 0),
   };
 
-  saveRequestUsage({
+  const saved = await saveRequestUsage({
     provider: provider || "unknown",
     model: model || "unknown",
     tokens: normalized,
@@ -98,5 +112,33 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
     connectionId: connectionId || undefined,
     apiKey: apiKey || undefined,
     endpoint: endpoint || null
-  }).catch(() => {});
+  }).catch(() => null);
+
+  return saved?.quotaStatus || null;
+}
+
+export function buildQuotaLockedResponse(quotaStatus, source = {}) {
+  const message = quotaStatus?.message || "API key token quota reached. The key was locked.";
+  const body = {
+    error: {
+      message,
+      type: "rate_limit_exceeded",
+      code: "api_key_token_quota_exceeded",
+      keyAutoDisabled: !!quotaStatus?.keyAutoDisabled,
+      usage: quotaStatus?.usage,
+      limit: quotaStatus?.limit,
+      breach: quotaStatus?.breach,
+      provider: source.provider,
+      model: source.model,
+    },
+  };
+
+  return new Response(JSON.stringify(body), {
+    status: 429,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "X-9Router-Quota-Locked": "true",
+    },
+  });
 }
