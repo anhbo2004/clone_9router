@@ -1,19 +1,15 @@
 <div align="center">
   <img src="./images/9router.png?1" alt="9Router Dashboard" width="800"/>
   
-  # 9Router - FREE AI Router & Token Saver
+  # clone_9router - Personal AI Router Setup
   
-  **Never stop coding. Save 20-40% tokens with RTK + auto-fallback to FREE & cheap AI models.**
+  **Bản cá nhân hóa để vận hành stack AI riêng: token limits, auto fallback, bulk account tools.**
   
-  **Connect All AI Code Tools (Claude Code, Cursor, Antigravity, Copilot, Codex, Gemini, OpenCode, Cline, OpenClaw...) to 40+ AI Providers & 100+ Models.**
+  **Dành cho nhu cầu cá nhân: quản lý key, quota, provider và các luồng test nhanh không cần CLI.**
   
-  [![npm](https://img.shields.io/npm/v/9router.svg)](https://www.npmjs.com/package/9router)
-  [![Downloads](https://img.shields.io/npm/dm/9router.svg)](https://www.npmjs.com/package/9router)
-  [![License](https://img.shields.io/npm/l/9router.svg)](https://github.com/decolua/9router/blob/main/LICENSE)
-
-  <a href="https://trendshift.io/repositories/22628" target="_blank"><img src="https://trendshift.io/api/badge/repositories/22628" alt="decolua%2F9router | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+  [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
   
-  [🚀 Quick Start](#-quick-start) • [💡 Features](#-key-features) • [📖 Setup](#-setup-guide) • [🌐 Website](https://9router.com)
+  [🚀 Quick Start](#-quick-start) • [💡 Features](#-key-features) • [📖 Setup](#-setup-guide) • [📦 Repo](https://github.com/anhbo2004/clone_9router)
 
   [🇻🇳 Tiếng Việt](./i18n/README.vi.md) • [🇨🇳 中文](./i18n/README.zh-CN.md) • [🇯🇵 日本語](./i18n/README.ja-JP.md)
 </div>
@@ -21,6 +17,8 @@
 ---
 
 ## 🤔 Why 9Router?
+
+> Note: README này là bản dùng riêng cho repo cá nhân `clone_9router`, tập trung vào workflow thực tế của tôi.
 
 **Stop wasting money, tokens and hitting limits:**
 
@@ -1284,35 +1282,16 @@ Authorization: Bearer your-api-key
 
 ## 📧 Support
 
-- **Website**: [9router.com](https://9router.com)
-- **GitHub**: [github.com/decolua/9router](https://github.com/decolua/9router)
-- **Issues**: [github.com/decolua/9router/issues](https://github.com/decolua/9router/issues)
+- **GitHub**: [github.com/anhbo2004/clone_9router](https://github.com/anhbo2004/clone_9router)
+- **Issues**: [github.com/anhbo2004/clone_9router/issues](https://github.com/anhbo2004/clone_9router/issues)
 
 ---
 
-## 👥 Contributors
+## 📝 Personal Notes
 
-Thanks to all contributors who helped make 9Router better!
-
-[![Contributors](https://contrib.rocks/image?repo=decolua/9router&max=150&columns=15&anon=1&v=20260309)](https://github.com/decolua/9router/graphs/contributors)
-
----
-
-## 📊 Star Chart
-
-[![Star Chart](https://starchart.cc/decolua/9router.svg?variant=adaptive)](https://starchart.cc/decolua/9router)
-
-
-
-## 🔀 Forks
-
-**[OmniRoute](https://github.com/diegosouzapw/OmniRoute)** — A full-featured TypeScript fork of 9Router. Adds 36+ providers, 4-tier auto-fallback, multi-modal APIs (images, embeddings, audio, TTS), circuit breaker, semantic cache, LLM evaluations, and a polished dashboard. 368+ unit tests. Available via npm and Docker.
-
----
-
-## 🙏 Acknowledgments
-
-Special thanks to **CLIProxyAPI** - the original Go implementation that inspired this JavaScript port.
+- Đây là bản fork phục vụ vận hành cá nhân.
+- Ưu tiên tính năng thực dụng: quota theo API key, quick test UI, bulk automation, public key usage checker.
+- Khi update, ưu tiên giữ ổn định workflow hiện tại hơn là theo sát mọi thay đổi từ repo gốc.
 
 ---
 
