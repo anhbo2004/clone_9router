@@ -55,7 +55,6 @@ export default function ApiKeyTokenLimits() {
         Object.fromEntries(
           nextKeys.map((key) => {
             const current = {
-              used: Number(key.usage?.totalTokens || 0),
               limit: Number(key.quota?.maxTotalTokens || 0),
             };
             return [key.id, dirtyRows[key.id] ? prev[key.id] || current : current];
@@ -138,7 +137,6 @@ export default function ApiKeyTokenLimits() {
 
   function getRowEdit(key) {
     return rowEdits[key.id] || {
-      used: Number(key.usage?.totalTokens || 0),
       limit: Number(key.quota?.maxTotalTokens || 0),
     };
   }
@@ -158,9 +156,6 @@ export default function ApiKeyTokenLimits() {
           maxTotalTokens: Number(edit.limit || 0),
           maxInputTokens: 0,
           maxOutputTokens: 0,
-        },
-        usage: {
-          totalTokens: Number(edit.used || 0),
         },
       });
       setDirtyRows((prev) => {
@@ -296,15 +291,7 @@ export default function ApiKeyTokenLimits() {
                     </div>
                     <div className="mt-1 text-xs text-neutral-400">Requests: {fmt(requests)}</div>
 
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      <input
-                        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
-                        type="number"
-                        min="0"
-                        value={edit.used}
-                        onChange={(e) => onChangeRow(key.id, "used", e.target.value)}
-                        placeholder="Used"
-                      />
+                    <div className="mt-2 grid gap-2">
                       <input
                         className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
                         type="number"
@@ -333,7 +320,7 @@ export default function ApiKeyTokenLimits() {
                       {testingId === key.id ? "Testing..." : "Quick test"}
                     </button>
                     <button className="rounded bg-emerald-700 px-3 py-1 hover:bg-emerald-600 disabled:opacity-60" disabled={savingId === key.id} onClick={() => saveRow(key)}>
-                      {savingId === key.id ? "Saving..." : "Save Used/Limit"}
+                      {savingId === key.id ? "Saving..." : "Save Limit"}
                     </button>
                     <button className="rounded bg-neutral-800 px-3 py-1 hover:bg-neutral-700" onClick={() => patchKey(key.id, { enabled: !key.enabled })}>{key.enabled ? "Disable" : "Enable"}</button>
                     <button className="rounded bg-red-700 px-3 py-1 hover:bg-red-600" onClick={() => deleteKey(key.id)}>Delete</button>

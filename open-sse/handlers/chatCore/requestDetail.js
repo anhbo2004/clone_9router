@@ -20,44 +20,76 @@ export function extractRequestConfig(body, stream) {
   return config;
 }
 
+function toFiniteNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
 export function extractUsageFromResponse(responseBody) {
   if (!responseBody || typeof responseBody !== "object") return null;
 
-  // Claude format
+  // Claude / Responses API input-output format
   if (responseBody.usage?.input_tokens !== undefined) {
+    const usage = responseBody.usage;
+    const inputTokens = toFiniteNumber(usage.input_tokens);
+    const outputTokens = toFiniteNumber(usage.output_tokens);
+    const cacheReadTokens = toFiniteNumber(usage.cache_read_input_tokens ?? usage.input_tokens_details?.cached_tokens);
+    const cacheCreationTokens = toFiniteNumber(usage.cache_creation_input_tokens);
+    const reasoningTokens = toFiniteNumber(usage.reasoning_tokens ?? usage.output_tokens_details?.reasoning_tokens);
     return {
-      prompt_tokens: responseBody.usage.input_tokens || 0,
-      completion_tokens: responseBody.usage.output_tokens || 0,
-      total_tokens: (responseBody.usage.input_tokens || 0) + (responseBody.usage.output_tokens || 0),
-      cache_read_input_tokens: responseBody.usage.cache_read_input_tokens,
-      cache_creation_input_tokens: responseBody.usage.cache_creation_input_tokens
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      prompt_tokens: inputTokens,
+      completion_tokens: outputTokens,
+      total_tokens:
+        usage.total_tokens ??
+        usage.totalTokens ??
+        inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens + reasoningTokens,
+      cached_tokens: cacheReadTokens,
+      cache_read_input_tokens: cacheReadTokens,
+      cache_creation_input_tokens: cacheCreationTokens,
+      reasoning_tokens: reasoningTokens,
+      prompt_tokens_details: usage.input_tokens_details,
+      completion_tokens_details: usage.output_tokens_details
     };
   }
 
   // OpenAI format
   if (responseBody.usage?.prompt_tokens !== undefined) {
+    const usage = responseBody.usage;
+    const promptTokens = toFiniteNumber(usage.prompt_tokens);
+    const completionTokens = toFiniteNumber(usage.completion_tokens);
+    const reasoningTokens = toFiniteNumber(usage.reasoning_tokens ?? usage.completion_tokens_details?.reasoning_tokens);
     return {
-      prompt_tokens: responseBody.usage.prompt_tokens || 0,
-      completion_tokens: responseBody.usage.completion_tokens || 0,
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
       total_tokens:
-        responseBody.usage.total_tokens ??
-        (Number(responseBody.usage.prompt_tokens || 0) + Number(responseBody.usage.completion_tokens || 0)),
-      cached_tokens: responseBody.usage.prompt_tokens_details?.cached_tokens,
-      reasoning_tokens: responseBody.usage.completion_tokens_details?.reasoning_tokens
+        usage.total_tokens ??
+        promptTokens + completionTokens + reasoningTokens,
+      cached_tokens: usage.cached_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens,
+      cache_read_input_tokens: usage.cache_read_input_tokens ?? usage.prompt_tokens_details?.cached_tokens,
+      cache_creation_input_tokens: usage.cache_creation_input_tokens,
+      reasoning_tokens: reasoningTokens,
+      prompt_tokens_details: usage.prompt_tokens_details,
+      completion_tokens_details: usage.completion_tokens_details
     };
   }
 
   // Gemini format
   if (responseBody.usageMetadata) {
+    const usage = responseBody.usageMetadata;
+    const promptTokens = toFiniteNumber(usage.promptTokenCount);
+    const completionTokens = toFiniteNumber(usage.candidatesTokenCount);
+    const reasoningTokens = toFiniteNumber(usage.thoughtsTokenCount);
     return {
-      prompt_tokens: responseBody.usageMetadata.promptTokenCount || 0,
-      completion_tokens: responseBody.usageMetadata.candidatesTokenCount || 0,
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
       total_tokens:
-        responseBody.usageMetadata.totalTokenCount ??
-        (Number(responseBody.usageMetadata.promptTokenCount || 0) +
-          Number(responseBody.usageMetadata.candidatesTokenCount || 0) +
-          Number(responseBody.usageMetadata.thoughtsTokenCount || 0)),
-      reasoning_tokens: responseBody.usageMetadata.thoughtsTokenCount
+        usage.totalTokenCount ??
+        promptTokens + completionTokens + reasoningTokens,
+      cached_tokens: usage.cachedContentTokenCount,
+      cache_read_input_tokens: usage.cachedContentTokenCount,
+      reasoning_tokens: reasoningTokens
     };
   }
 
@@ -84,8 +116,18 @@ export function buildRequestDetail(base, overrides = {}) {
 export async function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, label = "USAGE" }) {
   if (!tokens || typeof tokens !== "object") return null;
 
-  const inTokens = tokens.input_tokens ?? tokens.prompt_tokens ?? 0;
-  const outTokens = tokens.output_tokens ?? tokens.completion_tokens ?? 0;
+  const promptDetails = tokens.prompt_tokens_details || tokens.input_tokens_details || {};
+  const completionDetails = tokens.completion_tokens_details || tokens.output_tokens_details || {};
+  const inTokens = toFiniteNumber(tokens.input_tokens ?? tokens.prompt_tokens);
+  const outTokens = toFiniteNumber(tokens.output_tokens ?? tokens.completion_tokens);
+  const cachedTokens = toFiniteNumber(
+    tokens.cached_tokens ??
+      tokens.cache_read_input_tokens ??
+      promptDetails.cached_tokens ??
+      tokens.prompt_cache_hit_tokens
+  );
+  const cacheCreationTokens = toFiniteNumber(tokens.cache_creation_input_tokens);
+  const reasoningTokens = toFiniteNumber(tokens.reasoning_tokens ?? completionDetails.reasoning_tokens);
 
   if (inTokens === 0 && outTokens === 0) return null;
 
@@ -95,13 +137,20 @@ export async function saveUsageStats({ provider, model, tokens, connectionId, ap
 
   // Normalize to OpenAI token shape for storage
   const normalized = {
-    prompt_tokens: tokens.prompt_tokens ?? tokens.input_tokens ?? 0,
-    completion_tokens: tokens.completion_tokens ?? tokens.output_tokens ?? 0,
+    prompt_tokens: inTokens,
+    completion_tokens: outTokens,
     total_tokens:
       tokens.total_tokens ??
-      Number(tokens.prompt_tokens ?? tokens.input_tokens ?? 0) +
-        Number(tokens.completion_tokens ?? tokens.output_tokens ?? 0) +
-        Number(tokens.reasoning_tokens || 0),
+      inTokens +
+        outTokens +
+        reasoningTokens +
+        (tokens.input_tokens !== undefined ? cachedTokens + cacheCreationTokens : 0),
+    cached_tokens: cachedTokens,
+    cache_read_input_tokens: cachedTokens,
+    cache_creation_input_tokens: cacheCreationTokens,
+    reasoning_tokens: reasoningTokens,
+    prompt_tokens_details: promptDetails,
+    completion_tokens_details: completionDetails,
   };
 
   const saved = await saveRequestUsage({

@@ -35,20 +35,65 @@ async function writeQuotaDb(db) {
   await fs.writeFile(DB_FILE, JSON.stringify(db, null, 2), "utf8");
 }
 
+function toFiniteNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function normalizeTokenRow(row = {}) {
+  const promptDetails = row.prompt_tokens_details || row.input_tokens_details || {};
+  const completionDetails = row.completion_tokens_details || row.output_tokens_details || {};
+  const inputTokens = toFiniteNumber(row.inputTokens ?? row.prompt_tokens ?? row.input_tokens);
+  const outputTokens = toFiniteNumber(row.outputTokens ?? row.completion_tokens ?? row.output_tokens);
+  const cachedTokens = toFiniteNumber(
+    row.cachedTokens ??
+      row.cached_tokens ??
+      row.cache_read_input_tokens ??
+      promptDetails.cached_tokens ??
+      row.prompt_cache_hit_tokens
+  );
+  const cacheCreationTokens = toFiniteNumber(row.cacheCreationTokens ?? row.cache_creation_input_tokens);
+  const reasoningTokens = toFiniteNumber(row.reasoningTokens ?? row.reasoning_tokens ?? completionDetails.reasoning_tokens);
+  const totalTokens = toFiniteNumber(
+    row.totalTokens ?? row.total_tokens,
+    inputTokens +
+      outputTokens +
+      reasoningTokens +
+      (row.input_tokens !== undefined ? cachedTokens + cacheCreationTokens : 0)
+  );
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    cachedTokens,
+    cacheCreationTokens,
+    reasoningTokens,
+  };
+}
+
 function aggregateUsageRows(rows = []) {
   return rows.reduce(
     (acc, row) => {
+      const tokens = normalizeTokenRow(row);
       acc.requests += 1;
-      acc.inputTokens += Number(row.inputTokens || row.prompt_tokens || 0);
-      acc.outputTokens += Number(row.outputTokens || row.completion_tokens || 0);
-      acc.totalTokens += Number(
-        row.totalTokens ??
-          row.total_tokens ??
-          Number(row.inputTokens || row.prompt_tokens || 0) + Number(row.outputTokens || row.completion_tokens || 0)
-      );
+      acc.inputTokens += tokens.inputTokens;
+      acc.outputTokens += tokens.outputTokens;
+      acc.totalTokens += tokens.totalTokens;
+      acc.cachedTokens += tokens.cachedTokens;
+      acc.cacheCreationTokens += tokens.cacheCreationTokens;
+      acc.reasoningTokens += tokens.reasoningTokens;
       return acc;
     },
-    { requests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+    {
+      requests: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      cachedTokens: 0,
+      cacheCreationTokens: 0,
+      reasoningTokens: 0,
+    }
   );
 }
 
@@ -76,19 +121,7 @@ function shapeTokenApiKey(key) {
 }
 
 function normalizeUsageTotals(usage = {}) {
-  const inputTokens = Number(usage.inputTokens ?? usage.prompt_tokens ?? usage.input_tokens ?? 0);
-  const outputTokens = Number(usage.outputTokens ?? usage.completion_tokens ?? usage.output_tokens ?? 0);
-  const totalTokens = Number(
-    usage.totalTokens ??
-      usage.total_tokens ??
-      (Number.isFinite(inputTokens) ? inputTokens : 0) + (Number.isFinite(outputTokens) ? outputTokens : 0)
-  );
-
-  return {
-    inputTokens: Number.isFinite(inputTokens) ? inputTokens : 0,
-    outputTokens: Number.isFinite(outputTokens) ? outputTokens : 0,
-    totalTokens: Number.isFinite(totalTokens) ? totalTokens : 0,
-  };
+  return normalizeTokenRow(usage);
 }
 
 function getQuotaBreach(usage = {}, quota = {}, { inclusive = true } = {}) {
@@ -362,7 +395,7 @@ export async function getTokenApiKeyUsage(apiKeyId, window = "monthly") {
   const internalUsage = aggregateUsageRows(internalRows);
 
   // Exact usage from open-sse usage history (saved with apiKey + real/normalized tokens)
-  let exactUsage = { requests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  let exactUsage = aggregateUsageRows();
   try {
     const keys = await getApiKeys();
     const keyObj = keys.find((k) => k.id === apiKeyId);
@@ -373,14 +406,7 @@ export async function getTokenApiKeyUsage(apiKeyId, window = "monthly") {
       const rows = history
         .filter((row) => row.apiKey === apiKeyValue)
         .map((row) => {
-          const promptTokens = Number(row.tokens?.prompt_tokens || row.tokens?.input_tokens || 0);
-          const completionTokens = Number(row.tokens?.completion_tokens || row.tokens?.output_tokens || 0);
-          const reasoningTokens = Number(row.tokens?.reasoning_tokens || 0);
-          return {
-            prompt_tokens: promptTokens,
-            completion_tokens: completionTokens,
-            total_tokens: Number(row.tokens?.total_tokens ?? promptTokens + completionTokens + reasoningTokens),
-          };
+          return normalizeTokenRow(row.tokens || {});
         });
       exactUsage = aggregateUsageRows(rows);
     }
@@ -393,6 +419,11 @@ export async function getTokenApiKeyUsage(apiKeyId, window = "monthly") {
     inputTokens: exactUsage.inputTokens + internalUsage.inputTokens,
     outputTokens: exactUsage.outputTokens + internalUsage.outputTokens,
     totalTokens: exactUsage.totalTokens + internalUsage.totalTokens,
+    cachedTokens: exactUsage.cachedTokens + internalUsage.cachedTokens,
+    cacheCreationTokens: exactUsage.cacheCreationTokens + internalUsage.cacheCreationTokens,
+    reasoningTokens: exactUsage.reasoningTokens + internalUsage.reasoningTokens,
+    exactRequests: exactUsage.requests,
+    internalRequests: internalUsage.requests,
   };
 
   const override = db.usageOverrides
@@ -404,9 +435,7 @@ export async function getTokenApiKeyUsage(apiKeyId, window = "monthly") {
 
   return {
     ...usage,
-    inputTokens: Number(override.inputTokens ?? usage.inputTokens ?? 0),
-    outputTokens: Number(override.outputTokens ?? usage.outputTokens ?? 0),
-    totalTokens: Number(override.totalTokens ?? usage.totalTokens ?? 0),
+    manualBaselineTokens: toFiniteNumber(override.totalTokens),
   };
 }
 
@@ -459,10 +488,11 @@ export async function getTokenApiKeyDailyTrend(apiKeyId, days = 7) {
 
     const bucket = bucketMap.get(vietnamDayKey(createdAt));
     if (!bucket) continue;
+    const tokens = normalizeTokenRow(row);
     bucket.requests += 1;
-    bucket.inputTokens += Number(row.inputTokens || 0);
-    bucket.outputTokens += Number(row.outputTokens || 0);
-    bucket.totalTokens += Number(row.totalTokens ?? Number(row.inputTokens || 0) + Number(row.outputTokens || 0));
+    bucket.inputTokens += tokens.inputTokens;
+    bucket.outputTokens += tokens.outputTokens;
+    bucket.totalTokens += tokens.totalTokens;
   }
 
   try {
@@ -477,13 +507,11 @@ export async function getTokenApiKeyDailyTrend(apiKeyId, days = 7) {
         const bucket = bucketMap.get(vietnamDayKey(new Date(row.timestamp || 0)));
         if (!bucket) continue;
 
-        const inputTokens = Number(row.tokens?.prompt_tokens || row.tokens?.input_tokens || 0);
-        const outputTokens = Number(row.tokens?.completion_tokens || row.tokens?.output_tokens || 0);
-        const reasoningTokens = Number(row.tokens?.reasoning_tokens || 0);
+        const tokens = normalizeTokenRow(row.tokens || {});
         bucket.requests += 1;
-        bucket.inputTokens += inputTokens;
-        bucket.outputTokens += outputTokens;
-        bucket.totalTokens += Number(row.tokens?.total_tokens ?? inputTokens + outputTokens + reasoningTokens);
+        bucket.inputTokens += tokens.inputTokens;
+        bucket.outputTokens += tokens.outputTokens;
+        bucket.totalTokens += tokens.totalTokens;
       }
     }
   } catch {

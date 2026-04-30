@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteTokenApiKey, getTokenApiKeyUsage, setTokenApiKeyUsage, updateTokenApiKey } from "@/lib/tokenQuotaStore";
+import { deleteTokenApiKey, getTokenApiKeyUsage, updateTokenApiKey } from "@/lib/tokenQuotaStore";
 
 export const dynamic = "force-dynamic";
 
@@ -19,16 +19,6 @@ export async function PATCH(req, { params }) {
   const body = await req.json();
   const key = await updateTokenApiKey(id, body);
   if (!key) return NextResponse.json({ error: "API key not found" }, { status: 404 });
-  if (body?.usage && typeof body.usage === "object") {
-    const currentUsage = await getTokenApiKeyUsage(id, key.quota?.window || "monthly");
-    await setTokenApiKeyUsage({
-      apiKeyId: id,
-      window: key.quota?.window || "monthly",
-      totalTokens: Number(body.usage.totalTokens ?? currentUsage.totalTokens ?? 0),
-      inputTokens: Number(body.usage.inputTokens ?? currentUsage.inputTokens ?? 0),
-      outputTokens: Number(body.usage.outputTokens ?? currentUsage.outputTokens ?? 0),
-    });
-  }
   return NextResponse.json({ key });
 }
 
