@@ -25,12 +25,12 @@ function ProviderNode({ data }) {
   const [imgError, setImgError] = useState(false);
   return (
     <div
-      className={`flex items-center rounded-lg border-2 bg-bg transition-all duration-300 ${isCodex ? "gap-2.5 px-3.5 py-2" : "gap-2.5 px-4 py-2.5"}`}
+      className={`flex items-center rounded-lg border-2 bg-bg transition-all duration-300 ${isCodex ? "h-[46px] gap-3 px-3.5" : "gap-2.5 px-4 py-2.5"}`}
       style={{
         borderColor: active ? color : "var(--color-border)",
         boxShadow: active ? `0 0 16px ${color}40` : "none",
-        minWidth: isCodex ? "174px" : "150px",
-        maxWidth: isCodex ? "190px" : undefined,
+        minWidth: isCodex ? "184px" : "150px",
+        maxWidth: isCodex ? "196px" : undefined,
       }}
     >
       <Handle type="target" position={Position.Top} id="top" className="!bg-transparent !border-0 !w-0 !h-0" />
@@ -40,11 +40,11 @@ function ProviderNode({ data }) {
 
       {/* Provider icon */}
       <div
-        className={`${isCodex ? "h-7 w-7" : "h-8 w-8"} rounded-md flex items-center justify-center shrink-0`}
+        className={`${isCodex ? "h-8 w-8" : "h-8 w-8"} rounded-md flex items-center justify-center shrink-0`}
         style={{ backgroundColor: `${color}15` }}
       >
         {!imgError ? (
-          <img src={imageUrl} alt={label} className={`${isCodex ? "h-5 w-5" : "h-6 w-6"} rounded-sm object-contain`} onError={() => setImgError(true)} />
+          <img src={imageUrl} alt={label} className={`${isCodex ? "h-[22px] w-[22px]" : "h-6 w-6"} rounded-sm object-contain`} onError={() => setImgError(true)} />
         ) : (
           <span className="text-sm font-bold" style={{ color }}>{textIcon}</span>
         )}
@@ -52,7 +52,7 @@ function ProviderNode({ data }) {
 
       {/* Provider name */}
       <span
-        className={`${isCodex ? "text-sm font-semibold" : "text-base font-medium"} truncate`}
+        className={`${isCodex ? "text-[15px] font-semibold" : "text-base font-medium"} truncate`}
         style={{ color: active ? color : "var(--color-text)" }}
       >
         {label}
@@ -76,16 +76,16 @@ ProviderNode.propTypes = {
 // Center 9Router node
 function RouterNode({ data }) {
   return (
-    <div className="flex min-w-[126px] items-center justify-center rounded-xl border-2 border-primary bg-primary/5 px-4 py-2.5 shadow-md">
+    <div className="flex h-[44px] min-w-[138px] items-center justify-center rounded-xl border-2 border-primary bg-primary/5 px-4 shadow-md">
       <Handle type="source" position={Position.Top} id="top" className="!bg-transparent !border-0 !w-0 !h-0" />
       <Handle type="source" position={Position.Bottom} id="bottom" className="!bg-transparent !border-0 !w-0 !h-0" />
       <Handle type="source" position={Position.Left} id="left" className="!bg-transparent !border-0 !w-0 !h-0" />
       <Handle type="source" position={Position.Right} id="right" className="!bg-transparent !border-0 !w-0 !h-0" />
 
-      <img src="/favicon.svg" alt="9Router" className="mr-2 h-5 w-5" />
+      <img src="/favicon.svg" alt="9Router" className="mr-2 h-[22px] w-[22px]" />
       <span className="text-sm font-bold text-primary">9Router</span>
       {data.activeCount > 0 && (
-        <span className="ml-2 rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-bold leading-none text-white">
+        <span className="ml-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-bold leading-none text-white">
           {data.activeCount}
         </span>
       )}
@@ -101,9 +101,9 @@ const nodeTypes = { provider: ProviderNode, router: RouterNode };
 
 // Place N nodes evenly along an ellipse around the router center.
 function buildLayout(providers, activeSet, lastSet, errorSet) {
-  const nodeW = 180;
-  const nodeH = 30;
-  const routerW = 120;
+  const nodeW = 184;
+  const nodeH = 46;
+  const routerW = 138;
   const routerH = 44;
   const nodeGap = 24;
 
