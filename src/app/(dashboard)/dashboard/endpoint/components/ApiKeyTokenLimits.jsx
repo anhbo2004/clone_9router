@@ -6,6 +6,18 @@ function fmt(n) {
   return Number(n || 0).toLocaleString();
 }
 
+function fmtLimit(n) {
+  return Number(n || 0) > 0 ? fmt(n) : "Unlimited";
+}
+
+function remaining(used, limit) {
+  return Number(limit || 0) > 0 ? Math.max(0, Number(limit || 0) - Number(used || 0)) : null;
+}
+
+function percent(used, limit) {
+  return Number(limit || 0) > 0 ? Math.min(100, Math.round((Number(used || 0) / Number(limit || 0)) * 100)) : 0;
+}
+
 export default function ApiKeyTokenLimits() {
   const [keys, setKeys] = useState([]);
   const [secret, setSecret] = useState("");
@@ -45,8 +57,12 @@ export default function ApiKeyTokenLimits() {
         Object.fromEntries(
           nextKeys.map((key) => {
             const current = {
-              used: Number(key.usage?.totalTokens || 0),
-              limit: Number(key.quota?.maxTotalTokens || 0),
+              totalUsed: Number(key.usage?.totalTokens || 0),
+              inputUsed: Number(key.usage?.inputTokens || 0),
+              outputUsed: Number(key.usage?.outputTokens || 0),
+              totalLimit: Number(key.quota?.maxTotalTokens || 0),
+              inputLimit: Number(key.quota?.maxInputTokens || 0),
+              outputLimit: Number(key.quota?.maxOutputTokens || 0),
             };
             return [key.id, dirtyRows[key.id] ? prev[key.id] || current : current];
           })
@@ -128,8 +144,12 @@ export default function ApiKeyTokenLimits() {
 
   function getRowEdit(key) {
     return rowEdits[key.id] || {
-      used: Number(key.usage?.totalTokens || 0),
-      limit: Number(key.quota?.maxTotalTokens || 0),
+      totalUsed: Number(key.usage?.totalTokens || 0),
+      inputUsed: Number(key.usage?.inputTokens || 0),
+      outputUsed: Number(key.usage?.outputTokens || 0),
+      totalLimit: Number(key.quota?.maxTotalTokens || 0),
+      inputLimit: Number(key.quota?.maxInputTokens || 0),
+      outputLimit: Number(key.quota?.maxOutputTokens || 0),
     };
   }
 
@@ -143,8 +163,17 @@ export default function ApiKeyTokenLimits() {
     setSavingId(key.id);
     try {
       await patchKey(key.id, {
-        quota: { ...key.quota, maxTotalTokens: Number(edit.limit || 0) },
-        usage: { totalTokens: Number(edit.used || 0) },
+        quota: {
+          ...key.quota,
+          maxTotalTokens: Number(edit.totalLimit || 0),
+          maxInputTokens: Number(edit.inputLimit || 0),
+          maxOutputTokens: Number(edit.outputLimit || 0),
+        },
+        usage: {
+          totalTokens: Number(edit.totalUsed || 0),
+          inputTokens: Number(edit.inputUsed || 0),
+          outputTokens: Number(edit.outputUsed || 0),
+        },
       });
       setDirtyRows((prev) => {
         const next = { ...prev };
@@ -188,7 +217,11 @@ export default function ApiKeyTokenLimits() {
       });
       const data = await res.json();
       if (res.ok) {
-        setTestMessage(`Test OK: +${fmt(data.estimatedInputTokens || 0)} tokens`);
+        setTestMessage(
+          `Test OK: input +${fmt(data.estimatedInputTokens || 0)}, output +${fmt(
+            data.estimatedOutputTokens || 0
+          )}, total +${fmt(data.estimatedTotalTokens || 0)} tokens`
+        );
       } else {
         setTestMessage(`Test fail (${res.status}): ${data.error || "Unknown error"}`);
       }
@@ -199,6 +232,8 @@ export default function ApiKeyTokenLimits() {
   }
 
   const totalUsed = useMemo(() => keys.reduce((s, k) => s + Number(k.usage?.totalTokens || 0), 0), [keys]);
+  const totalInputUsed = useMemo(() => keys.reduce((s, k) => s + Number(k.usage?.inputTokens || 0), 0), [keys]);
+  const totalOutputUsed = useMemo(() => keys.reduce((s, k) => s + Number(k.usage?.outputTokens || 0), 0), [keys]);
 
   return (
     <section className="mt-6 rounded-2xl border border-neutral-800 bg-neutral-950/70 p-5 text-neutral-100">
@@ -209,7 +244,9 @@ export default function ApiKeyTokenLimits() {
             {liveConnected ? "Live updates connected" : "Live updates reconnecting"}
             {lastUpdatedAt ? ` | Last update: ${new Date(lastUpdatedAt).toLocaleTimeString()}` : ""}
           </p>
-          <p className="text-sm text-neutral-400">Giới hạn token theo từng API key. Tổng đã dùng: {fmt(totalUsed)} tokens.</p>
+          <p className="text-sm text-neutral-400">
+            Token usage: total {fmt(totalUsed)} | input {fmt(totalInputUsed)} | output {fmt(totalOutputUsed)}.
+          </p>
         </div>
         <button onClick={load} className="rounded-lg border border-neutral-700 px-3 py-2 text-sm hover:bg-neutral-800">Refresh</button>
       </div>
@@ -221,9 +258,11 @@ export default function ApiKeyTokenLimits() {
         </div>
       ) : null}
 
-      <div className="mb-6 grid gap-3 md:grid-cols-6">
+      <div className="mb-6 grid gap-3 md:grid-cols-8">
         <input className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 md:col-span-2" placeholder="Tên key, ví dụ: Team A" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        <input className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2" type="number" placeholder="Total tokens" value={form.maxTotalTokens} onChange={(e) => setForm({ ...form, maxTotalTokens: e.target.value })} />
+        <input className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2" type="number" placeholder="Total limit" value={form.maxTotalTokens} onChange={(e) => setForm({ ...form, maxTotalTokens: e.target.value })} />
+        <input className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2" type="number" placeholder="Input limit" value={form.maxInputTokens} onChange={(e) => setForm({ ...form, maxInputTokens: e.target.value })} />
+        <input className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2" type="number" placeholder="Output limit" value={form.maxOutputTokens} onChange={(e) => setForm({ ...form, maxOutputTokens: e.target.value })} />
         <select className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2" value={form.window} onChange={(e) => setForm({ ...form, window: e.target.value })}>
           <option value="rolling_5h">Rolling 5h</option>
           <option value="daily">Daily</option>
@@ -254,10 +293,18 @@ export default function ApiKeyTokenLimits() {
               const used = Number(key.usage?.totalTokens || 0);
               const requests = Number(key.usage?.requests || 0);
               const limit = Number(key.quota?.maxTotalTokens || 0);
-              const remaining = limit > 0 ? Math.max(0, limit - used) : null;
+              const inputLimit = Number(key.quota?.maxInputTokens || 0);
+              const outputLimit = Number(key.quota?.maxOutputTokens || 0);
+              const remainingTotal = remaining(used, limit);
+              const remainingInput = remaining(usedInput, inputLimit);
+              const remainingOutput = remaining(usedOutput, outputLimit);
               const edit = getRowEdit(key);
-              const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+              const pct = percent(used, limit);
+              const inputPct = percent(usedInput, inputLimit);
+              const outputPct = percent(usedOutput, outputLimit);
               const over = limit > 0 && used >= limit;
+              const inputOver = inputLimit > 0 && usedInput >= inputLimit;
+              const outputOver = outputLimit > 0 && usedOutput >= outputLimit;
               const quotaLocked = key.disabledReason === "token_quota_exceeded";
               return (
                 <tr key={key.id} className="border-t border-neutral-800">
@@ -272,29 +319,98 @@ export default function ApiKeyTokenLimits() {
                   </td>
                   <td className="p-3">{key.quota?.window}</td>
                   <td className="p-3">
-                    <div>{fmt(used)} / {limit ? fmt(limit) : "∞"}</div>
-                    <div className="mt-1 h-2 rounded bg-neutral-800">
-                      <div className={`h-2 rounded ${over ? "bg-red-600" : "bg-orange-600"}`} style={{ width: `${pct}%` }} />
+                    <div className="space-y-2">
+                      <div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="font-medium">Total</span>
+                          <span>{fmt(used)} / {fmtLimit(limit)}</span>
+                        </div>
+                        <div className="mt-1 h-2 rounded bg-neutral-800">
+                          <div className={`h-2 rounded ${over ? "bg-red-600" : "bg-orange-600"}`} style={{ width: `${pct}%` }} />
+                        </div>
+                        <div className="mt-1 text-xs text-neutral-500">
+                          Remaining: {remainingTotal === null ? "Unlimited" : fmt(remainingTotal)}
+                        </div>
+                      </div>
+
+                      <div className="grid gap-2 md:grid-cols-2">
+                        <div>
+                          <div className="flex items-center justify-between gap-2 text-xs">
+                            <span className="text-neutral-400">Input</span>
+                            <span>{fmt(usedInput)} / {fmtLimit(inputLimit)}</span>
+                          </div>
+                          <div className="mt-1 h-1.5 rounded bg-neutral-800">
+                            <div className={`h-1.5 rounded ${inputOver ? "bg-red-600" : "bg-sky-500"}`} style={{ width: `${inputPct}%` }} />
+                          </div>
+                          <div className="mt-1 text-[11px] text-neutral-500">
+                            Left: {remainingInput === null ? "Unlimited" : fmt(remainingInput)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between gap-2 text-xs">
+                            <span className="text-neutral-400">Output</span>
+                            <span>{fmt(usedOutput)} / {fmtLimit(outputLimit)}</span>
+                          </div>
+                          <div className="mt-1 h-1.5 rounded bg-neutral-800">
+                            <div className={`h-1.5 rounded ${outputOver ? "bg-red-600" : "bg-emerald-500"}`} style={{ width: `${outputPct}%` }} />
+                          </div>
+                          <div className="mt-1 text-[11px] text-neutral-500">
+                            Left: {remainingOutput === null ? "Unlimited" : fmt(remainingOutput)}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="mt-1 text-xs text-neutral-400">
-                      Requests: {fmt(requests)} | Input: {fmt(usedInput)} | Output: {fmt(usedOutput)} | Remaining: {remaining === null ? "∞" : fmt(remaining)}
-                    </div>
+
+                    <div className="mt-2 text-xs text-neutral-400">Requests: {fmt(requests)}</div>
+
                     <div className="mt-2 grid grid-cols-2 gap-2">
                       <input
                         className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
                         type="number"
                         min="0"
-                        value={edit.used}
-                        onChange={(e) => onChangeRow(key.id, "used", e.target.value)}
-                        placeholder="Used"
+                        value={edit.totalUsed}
+                        onChange={(e) => onChangeRow(key.id, "totalUsed", e.target.value)}
+                        placeholder="Total used"
                       />
                       <input
                         className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
                         type="number"
                         min="0"
-                        value={edit.limit}
-                        onChange={(e) => onChangeRow(key.id, "limit", e.target.value)}
-                        placeholder="Limit"
+                        value={edit.totalLimit}
+                        onChange={(e) => onChangeRow(key.id, "totalLimit", e.target.value)}
+                        placeholder="Total limit"
+                      />
+                      <input
+                        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
+                        type="number"
+                        min="0"
+                        value={edit.inputUsed}
+                        onChange={(e) => onChangeRow(key.id, "inputUsed", e.target.value)}
+                        placeholder="Input used"
+                      />
+                      <input
+                        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
+                        type="number"
+                        min="0"
+                        value={edit.inputLimit}
+                        onChange={(e) => onChangeRow(key.id, "inputLimit", e.target.value)}
+                        placeholder="Input limit"
+                      />
+                      <input
+                        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
+                        type="number"
+                        min="0"
+                        value={edit.outputUsed}
+                        onChange={(e) => onChangeRow(key.id, "outputUsed", e.target.value)}
+                        placeholder="Output used"
+                      />
+                      <input
+                        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
+                        type="number"
+                        min="0"
+                        value={edit.outputLimit}
+                        onChange={(e) => onChangeRow(key.id, "outputLimit", e.target.value)}
+                        placeholder="Output limit"
                       />
                     </div>
                   </td>

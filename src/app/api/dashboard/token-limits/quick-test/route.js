@@ -43,7 +43,7 @@ export async function POST(req) {
       model,
       provider: "quick-test",
       inputTokens: check.estimatedInputTokens || 0,
-      outputTokens: 0,
+      outputTokens: check.estimatedOutputTokens || 0,
     });
 
     if (usageRecord?.quotaStatus?.locked) {
@@ -65,6 +65,8 @@ export async function POST(req) {
       ok: true,
       message: "Quick test passed and usage recorded",
       estimatedInputTokens: check.estimatedInputTokens || 0,
+      estimatedOutputTokens: check.estimatedOutputTokens || 0,
+      estimatedTotalTokens: Number(check.estimatedInputTokens || 0) + Number(check.estimatedOutputTokens || 0),
     });
   } catch (error) {
     return NextResponse.json({ error: error?.message || "Quick test failed" }, { status: 500 });
