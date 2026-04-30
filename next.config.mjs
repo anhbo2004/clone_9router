@@ -8,6 +8,7 @@ const nextConfig = {
   output: "standalone",
   outputFileTracingRoot: __dirname,
   serverExternalPackages: ["better-sqlite3"],
+  allowedDevOrigins: ["*.9router.com", "ruvtk9s.9router.com"],
   images: {
     unoptimized: true
   },

@@ -54,17 +54,6 @@ function Icon({ children, className = "h-4 w-4" }) {
   );
 }
 
-function LogoMark() {
-  return (
-    <div className="grid h-8 w-8 place-items-center rounded-lg bg-orange-600 text-white shadow-[0_0_24px_rgba(249,115,22,0.28)]">
-      <Icon className="h-5 w-5">
-        <circle cx="12" cy="12" r="2" />
-        <path d="M12 4v4M12 16v4M4 12h4M16 12h4M6.3 6.3l2.8 2.8M14.9 14.9l2.8 2.8M17.7 6.3l-2.8 2.8M9.1 14.9l-2.8 2.8" />
-      </Icon>
-    </div>
-  );
-}
-
 function StatCell({ icon, label, value, sub }) {
   return (
     <div className="min-h-[130px] border-t border-neutral-800/90 p-5 md:border-l md:first:border-l-0">
@@ -230,30 +219,7 @@ export default function CheckUsagePage() {
 
   return (
     <main className="min-h-screen bg-[#080706] text-neutral-100">
-      <header className="border-b border-neutral-900 bg-[#090807]/95">
-        <div className="mx-auto flex h-[74px] max-w-6xl items-center justify-between px-5">
-          <div className="flex items-center gap-3">
-            <LogoMark />
-            <span className="text-xl font-bold tracking-tight">KRouter</span>
-          </div>
-          <nav className="hidden items-center gap-8 text-sm font-semibold text-neutral-500 md:flex">
-            <a className="hover:text-neutral-200" href="/landing">Overview</a>
-            <a className="hover:text-neutral-200" href="/landing#how-it-works">How it Works</a>
-            <a className="hover:text-neutral-200" href="/dashboard/cli-tools">CLI Tools</a>
-            <a className="text-neutral-200" href="/check-usage">Check Usage</a>
-            <a className="hover:text-neutral-200" href="/dashboard">Notice</a>
-            <a className="hover:text-neutral-200" href="/dashboard">Docs</a>
-          </nav>
-          <button className="flex h-9 items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-950 px-3 text-sm text-neutral-300">
-            <Icon className="h-4 w-4">
-              <path d="M5 8h10M9 4v4M4 14l4-4 4 4M14 20l5-12 5 12M16 16h6" />
-            </Icon>
-            VI
-          </button>
-        </div>
-      </header>
-
-      <div className="mx-auto w-full max-w-[760px] px-5 py-7">
+      <div className="mx-auto w-full max-w-[760px] px-5 py-8">
         <form onSubmit={checkUsage} className="flex flex-col gap-3 sm:flex-row">
           <label className="relative min-h-12 flex-1">
             <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-neutral-500">
