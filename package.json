@@ -5,10 +5,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack --port 20129",
-    "build": "NODE_ENV=production next build --webpack",
+    "build": "next build --webpack && node scripts/prepare-standalone-static.mjs",
     "start": "node ./.next/standalone/server.js",
     "dev:bun": "bun --bun next dev --webpack --port 20129",
-    "build:bun": "NODE_ENV=production bun --bun next build --webpack",
+    "build:bun": "bun --bun next build --webpack && node scripts/prepare-standalone-static.mjs",
     "start:bun": "NODE_ENV=production bun ./.next/standalone/server.js"
   },
   "dependencies": {
