@@ -7,7 +7,6 @@ import {
   Handle,
   Position,
 } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 
 function getProviderConfig(providerId) {
