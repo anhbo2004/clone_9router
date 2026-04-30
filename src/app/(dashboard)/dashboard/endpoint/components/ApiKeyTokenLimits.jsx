@@ -209,6 +209,7 @@ export default function ApiKeyTokenLimits() {
               const usedInput = Number(key.usage?.inputTokens || 0);
               const usedOutput = Number(key.usage?.outputTokens || 0);
               const used = Number(key.usage?.totalTokens || 0);
+              const requests = Number(key.usage?.requests || 0);
               const limit = Number(key.quota?.maxTotalTokens || 0);
               const remaining = limit > 0 ? Math.max(0, limit - used) : null;
               const edit = getRowEdit(key);
@@ -232,7 +233,7 @@ export default function ApiKeyTokenLimits() {
                       <div className={`h-2 rounded ${over ? "bg-red-600" : "bg-orange-600"}`} style={{ width: `${pct}%` }} />
                     </div>
                     <div className="mt-1 text-xs text-neutral-400">
-                      Input: {fmt(usedInput)} | Output: {fmt(usedOutput)} | Remaining: {remaining === null ? "∞" : fmt(remaining)}
+                      Requests: {fmt(requests)} | Input: {fmt(usedInput)} | Output: {fmt(usedOutput)} | Remaining: {remaining === null ? "∞" : fmt(remaining)}
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-2">
                       <input

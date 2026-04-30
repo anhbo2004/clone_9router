@@ -34,6 +34,23 @@ async function writeQuotaDb(db) {
   await fs.writeFile(DB_FILE, JSON.stringify(db, null, 2), "utf8");
 }
 
+function aggregateUsageRows(rows = []) {
+  return rows.reduce(
+    (acc, row) => {
+      acc.requests += 1;
+      acc.inputTokens += Number(row.inputTokens || row.prompt_tokens || 0);
+      acc.outputTokens += Number(row.outputTokens || row.completion_tokens || 0);
+      acc.totalTokens += Number(
+        row.totalTokens ??
+          row.total_tokens ??
+          Number(row.inputTokens || row.prompt_tokens || 0) + Number(row.outputTokens || row.completion_tokens || 0)
+      );
+      return acc;
+    },
+    { requests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+  );
+}
+
 function ensureQuotaShape(key) {
   const quota = key.quota || {};
   return {
@@ -165,20 +182,48 @@ export async function findTokenApiKeyBySecret(secret) {
 export async function getTokenApiKeyUsage(apiKeyId, window = "monthly") {
   const db = await readQuotaDb();
   const since = quotaWindowStart(window);
+  const sinceDate = new Date(since);
 
-  const usage = db.usage
+  // Internal token-quota usage DB:
+  // keep quick-test/manual entries; legacy chat-completions estimates are ignored
+  const internalRows = db.usage
     .filter((row) => row.apiKeyId === apiKeyId)
-    .filter((row) => new Date(row.createdAt) >= new Date(since))
-    .reduce(
-      (acc, row) => {
-        acc.requests += 1;
-        acc.inputTokens += Number(row.inputTokens || 0);
-        acc.outputTokens += Number(row.outputTokens || 0);
-        acc.totalTokens += Number(row.totalTokens || 0);
-        return acc;
-      },
-      { requests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 }
-    );
+    .filter((row) => new Date(row.createdAt) >= sinceDate)
+    .filter((row) => row.provider !== "chat-completions");
+  const internalUsage = aggregateUsageRows(internalRows);
+
+  // Exact usage from open-sse usage history (saved with apiKey + real/normalized tokens)
+  let exactUsage = { requests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  try {
+    const keys = await getApiKeys();
+    const keyObj = keys.find((k) => k.id === apiKeyId);
+    const apiKeyValue = keyObj?.key;
+    if (apiKeyValue) {
+      const { getUsageHistory } = await import("@/lib/usageDb");
+      const history = await getUsageHistory({ startDate: since });
+      const rows = history
+        .filter((row) => row.apiKey === apiKeyValue)
+        .map((row) => ({
+          prompt_tokens: Number(row.tokens?.prompt_tokens || row.tokens?.input_tokens || 0),
+          completion_tokens: Number(row.tokens?.completion_tokens || row.tokens?.output_tokens || 0),
+          total_tokens: Number(
+            row.tokens?.total_tokens ??
+              Number(row.tokens?.prompt_tokens || row.tokens?.input_tokens || 0) +
+                Number(row.tokens?.completion_tokens || row.tokens?.output_tokens || 0)
+          ),
+        }));
+      exactUsage = aggregateUsageRows(rows);
+    }
+  } catch {
+    // Fallback to internalUsage when usageDb is unavailable
+  }
+
+  const usage = {
+    requests: exactUsage.requests + internalUsage.requests,
+    inputTokens: exactUsage.inputTokens + internalUsage.inputTokens,
+    outputTokens: exactUsage.outputTokens + internalUsage.outputTokens,
+    totalTokens: exactUsage.totalTokens + internalUsage.totalTokens,
+  };
 
   const override = db.usageOverrides
     .filter((row) => row.apiKeyId === apiKeyId && row.window === window)

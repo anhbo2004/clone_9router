@@ -1,7 +1,7 @@
 import { callCloudWithMachineId } from "@/shared/utils/cloud.js";
 import { handleChat } from "@/sse/handlers/chat.js";
 import { initTranslators } from "open-sse/translator/index.js";
-import { checkTokenQuota, findTokenApiKeyFromAuth, recordTokenUsage } from "@/lib/tokenQuotaStore";
+import { checkTokenQuota, findTokenApiKeyFromAuth } from "@/lib/tokenQuotaStore";
 
 let initialized = false;
 
@@ -48,13 +48,6 @@ export async function POST(request) {
         { status: tokenQuotaCheck.status || 429 }
       );
     }
-    await recordTokenUsage({
-      apiKeyId: tokenQuotaApiKey?.id,
-      model: body?.model,
-      provider: "chat-completions",
-      inputTokens: tokenQuotaCheck.estimatedInputTokens || 0,
-      outputTokens: tokenQuotaCheck.estimatedOutputTokens || 0,
-    });
   }
 
   // Fallback to local handling
